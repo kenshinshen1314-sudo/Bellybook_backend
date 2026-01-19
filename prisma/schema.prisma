@@ -1,0 +1,454 @@
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["fullTextSearchPostgres"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DIRECT_URL")
+}
+
+model analysis_quotas {
+  id        String   @id @default(cuid())
+  userId    String
+  date      DateTime @db.Date
+  count     Int      @default(0)
+  limit     Int      @default(10)
+  resetAt   DateTime
+  createdAt DateTime @default(now())
+  updatedAt DateTime @default(now())
+
+  @@unique([userId, date])
+  @@index([userId, date])
+}
+
+model cuisine_configs {
+  id           Int      @id @default(autoincrement())
+  name         String   @unique
+  nameEn       String?
+  nameZh       String?
+  category     String?
+  icon         String
+  color        String
+  description  String?
+  displayOrder Int      @default(0)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @default(now())
+
+  @@index([category])
+  @@index([displayOrder])
+}
+
+model cuisine_unlocks {
+  id           Int       @id @default(autoincrement())
+  userId       String
+  cuisineName  String
+  firstMealAt  DateTime
+  mealCount    Int       @default(1)
+  lastMealAt   DateTime?
+  cuisineIcon  String?
+  cuisineColor String?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @default(now())
+  users        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, cuisineName])
+  @@index([cuisineName])
+  @@index([userId])
+  @@index([userId, mealCount])
+}
+
+model daily_nutritions {
+  id                 Int      @id @default(autoincrement())
+  userId             String
+  date               DateTime @db.Date
+  totalCalories      Float    @default(0)
+  totalProtein       Float    @default(0)
+  totalFat           Float    @default(0)
+  totalCarbohydrates Float    @default(0)
+  totalFiber         Float    @default(0)
+  totalSugar         Float    @default(0)
+  totalSodium        Float    @default(0)
+  mealCount          Int      @default(0)
+  breakfastCount     Int      @default(0)
+  lunchCount         Int      @default(0)
+  dinnerCount        Int      @default(0)
+  snackCount         Int      @default(0)
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @default(now())
+  User              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, date])
+  @@index([date])
+  @@index([userId])
+}
+
+// 菜品知识库模型
+model Dish {
+  id               Int      @id @default(autoincrement())
+  name             String   @unique
+  cuisine          String
+  description      String?  @db.Text
+  historicalOrigins String? @db.Text
+
+  // 统计数据
+  appearanceCount  Int      @default(0)
+  averagePrice     Float?
+  averageCalories  Float?
+  averageProtein   Float?
+  averageFat       Float?
+  averageCarbs     Float?
+
+  meals            Meal[]
+
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@index([cuisine])
+  @@index([appearanceCount])
+  @@map("dishes")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model dishes_info {
+  id                 String    @id @default(dbgenerated("extensions.uuid_generate_v4()")) @db.Uuid
+  user_id            String    @db.Uuid
+  dishes             String
+  image_url          String
+  image_storage_path String?
+  meal_type          String
+  cuisine            String?
+  description        String?
+  calories           Decimal?  @default(0) @db.Decimal
+  protein            String?   @default("0g")
+  fat                String?   @default("0g")
+  carbs              String?   @default("0g")
+  plating            String?
+  sensory            String?
+  container          String?
+  suggestions        Json?     @default("[]")
+  created_at         DateTime? @default(now()) @db.Timestamptz(6)
+
+  @@index([created_at(sort: Desc)], map: "idx_dishes_created_at")
+  @@index([cuisine], map: "idx_dishes_cuisine")
+  @@index([meal_type], map: "idx_dishes_meal_type")
+  @@index([user_id], map: "idx_dishes_user_id")
+}
+
+model Meal {
+  @@map("meals")
+  id            String    @id @default(cuid())
+  userId        String
+  imageUrl      String
+  thumbnailUrl  String?
+  imageHash     String?
+  foodName      String
+  cuisine       String
+  mealType      MealType  @default(SNACK)
+  analysis      Json
+  calories      Float?
+  protein       Float?
+  fat           Float?
+  carbohydrates Float?
+  notes         String?
+  isSynced      Boolean   @default(false)
+  syncedAt      DateTime?
+  version       Int       @default(1)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @default(now())
+  analyzedAt    DateTime?
+  deletedAt     DateTime?
+  searchText    String?
+  dishId        Int?
+  dish          Dish?     @relation(fields: [dishId], references: [id])
+  price         Float?
+  users         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([createdAt])
+  @@index([cuisine])
+  @@index([deletedAt])
+  @@index([imageHash])
+  @@index([isSynced])
+  @@index([userId, createdAt])
+  @@index([userId])
+  @@index([userId, mealType])
+  @@index([dishId])
+}
+
+model ranking_caches {
+  id          String           @id @default(cuid())
+  period      RankingPeriod
+  cuisineName String?
+  tier        SubscriptionTier @default(FREE)
+  rankings    Json
+  expiresAt   DateTime
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @default(now())
+
+  @@unique([period, cuisineName, tier])
+  @@index([expiresAt])
+}
+
+model refresh_tokens {
+  id        String    @id @default(cuid())
+  token     String    @unique
+  userId    String
+  expiresAt DateTime
+  createdAt DateTime  @default(now())
+  revokedAt DateTime?
+  users     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([expiresAt])
+  @@index([token])
+  @@index([userId])
+}
+
+model sync_logs {
+  id        String            @id @default(cuid())
+  userId    String
+  operation SyncOperationType
+  tableName String
+  recordId  String
+  action    String
+  changes   Json?
+  ipAddress String?
+  userAgent String?
+  createdAt DateTime          @default(now())
+
+  @@index([createdAt])
+  @@index([tableName, recordId])
+  @@index([userId])
+}
+
+model sync_queues {
+  id           String              @id @default(cuid())
+  userId       String
+  type         SyncOperationType
+  payload      Json
+  resourceId   String?
+  status       SyncStatus          @default(PENDING)
+  conflictType String?
+  resolution   ConflictResolution?
+  retryCount   Int                 @default(0)
+  lastError    String?
+  processedAt  DateTime?
+  expiresAt    DateTime?
+  createdAt    DateTime            @default(now())
+  updatedAt    DateTime            @default(now())
+  User        User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([createdAt])
+  @@index([expiresAt])
+  @@index([type])
+  @@index([userId, status])
+}
+
+model system_configs {
+  id        String   @id @default("system")
+  key       String   @unique
+  value     Json
+  valueType String
+  updatedAt DateTime @default(now())
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model unlocked_dishes {
+  id                String    @id @default(dbgenerated("extensions.uuid_generate_v4()")) @db.Uuid
+  user_id           String    @db.Uuid
+  dish_name         String
+  cuisine           String
+  image_url         String?
+  first_unlocked_at DateTime? @default(now()) @db.Timestamptz(6)
+
+  @@unique([user_id, dish_name])
+  @@index([cuisine], map: "idx_unlocked_cuisine")
+  @@index([user_id], map: "idx_unlocked_user")
+}
+
+model user_achievements {
+  id          String   @id @default(cuid())
+  userId      String
+  type        String
+  title       String
+  description String?
+  icon        String?
+  unlockedAt  DateTime @default(now())
+  metadata    Json?
+  User       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([type])
+  @@index([userId])
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model user_follows {
+  id           String    @id @default(dbgenerated("extensions.uuid_generate_v4()")) @db.Uuid
+  follower_id  String    @db.Uuid
+  following_id String    @db.Uuid
+  created_at   DateTime? @default(now()) @db.Timestamptz(6)
+
+  @@unique([follower_id, following_id])
+  @@index([follower_id], map: "idx_follows_follower")
+  @@index([following_id], map: "idx_follows_following")
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model user_info {
+  id                     String    @id @default(dbgenerated("extensions.uuid_generate_v4()")) @db.Uuid
+  email                  String?   @unique
+  phone                  String?   @unique
+  avatar_url             String?
+  nickname               String?
+  bio                    String?
+  premium                Boolean?  @default(false)
+  language               String?   @default("zh")
+  theme                  String?   @default("light")
+  hide_ranking           Boolean?  @default(false)
+  notification_reminders Boolean?  @default(true)
+  created_at             DateTime? @default(now()) @db.Timestamptz(6)
+  modified_at            DateTime? @default(now()) @db.Timestamptz(6)
+  profile                String?
+
+  @@index([email], map: "idx_user_email")
+  @@index([phone], map: "idx_user_phone")
+}
+
+model user_profiles {
+  id          String   @id @default(cuid())
+  userId      String   @unique
+  displayName String
+  bio         String?
+  avatarUrl   String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @default(now())
+  User       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model user_settings {
+  id                   String   @id @default(cuid())
+  userId               String   @unique
+  language             Language @default(ZH)
+  theme                Theme    @default(AUTO)
+  notificationsEnabled Boolean  @default(true)
+  reminderTime         String?
+  hideRanking          Boolean  @default(false)
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @default(now())
+  User                User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model User {
+  id                    String              @id @default(cuid())
+  username              String              @unique
+  email                 String?             @unique
+  passwordHash          String
+  displayName           String?
+  bio                   String?
+  avatarUrl             String?
+  language              Language            @default(ZH)
+  theme                 Theme               @default(AUTO)
+  notificationsEnabled  Boolean             @default(true)
+  reminderTime          String
+  hideRanking           Boolean             @default(false)
+  subscriptionStatus    SubscriptionStatus  @default(PENDING)
+  subscriptionTier      SubscriptionTier    @default(FREE)
+  subscriptionExpiresAt DateTime?
+  premiumExpiresAt      DateTime?
+  dailyAnalysisCount    Int                 @default(0)
+  dailyAnalysisReset    DateTime            @default(now())
+  createdAt             DateTime            @default(now())
+  updatedAt             DateTime            @default(now())
+  lastLoginAt           DateTime?
+  deletedAt             DateTime?
+  cuisine_unlocks       cuisine_unlocks[]
+  daily_nutritions      daily_nutritions[]
+  meals                 Meal[]
+  refresh_tokens        refresh_tokens[]
+  sync_queues           sync_queues[]
+  user_achievements     user_achievements[]
+  user_profiles         user_profiles?
+  user_settings         user_settings?
+
+  @@index([createdAt])
+  @@index([deletedAt])
+  @@index([email])
+  @@index([subscriptionTier])
+  @@index([username])
+  @@map("users")
+}
+
+model webhook_events {
+  id          String    @id @default(cuid())
+  type        String
+  payload     Json
+  status      String    @default("pending")
+  processedAt DateTime?
+  result      Json?
+  error       String?
+  retryCount  Int       @default(0)
+  createdAt   DateTime  @default(now())
+
+  @@index([createdAt])
+  @@index([type, status])
+}
+
+enum ConflictResolution {
+  LAST_WRITE_WINS
+  SERVER_WINS
+  CLIENT_WINS
+  MANUAL
+}
+
+enum Language {
+  ZH
+  EN
+}
+
+enum MealType {
+  BREAKFAST
+  LUNCH
+  DINNER
+  SNACK
+}
+
+enum RankingPeriod {
+  WEEKLY
+  MONTHLY
+  YEARLY
+  ALL_TIME
+}
+
+enum SubscriptionStatus {
+  ACTIVE
+  CANCELED
+  EXPIRED
+  PENDING
+}
+
+enum SubscriptionTier {
+  FREE
+  PREMIUM
+  PRO
+}
+
+enum SyncOperationType {
+  CREATE_MEAL
+  UPDATE_MEAL
+  DELETE_MEAL
+  UPDATE_PROFILE
+  UPDATE_SETTINGS
+}
+
+enum SyncStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+}
+
+enum Theme {
+  LIGHT
+  DARK
+  AUTO
+}

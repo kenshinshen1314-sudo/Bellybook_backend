@@ -1,0 +1,91 @@
+"use strict";
+var __decorate = (this && this.__decorate) || function (decorators, target, key, desc) {
+    var c = arguments.length, r = c < 3 ? target : desc === null ? desc = Object.getOwnPropertyDescriptor(target, key) : desc, d;
+    if (typeof Reflect === "object" && typeof Reflect.decorate === "function") r = Reflect.decorate(decorators, target, key, desc);
+    else for (var i = decorators.length - 1; i >= 0; i--) if (d = decorators[i]) r = (c < 3 ? d(r) : c > 3 ? d(target, key, r) : d(target, key)) || r;
+    return c > 3 && r && Object.defineProperty(target, key, r), r;
+};
+var __metadata = (this && this.__metadata) || function (k, v) {
+    if (typeof Reflect === "object" && typeof Reflect.metadata === "function") return Reflect.metadata(k, v);
+};
+var DishesService_1;
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.DishesService = void 0;
+const common_1 = require("@nestjs/common");
+const prisma_service_1 = require("../../database/prisma.service");
+let DishesService = DishesService_1 = class DishesService {
+    prisma;
+    logger = new common_1.Logger(DishesService_1.name);
+    constructor(prisma) {
+        this.prisma = prisma;
+    }
+    async findOrCreateAndUpdate(foodName, cuisine, price, calories, protein, fat, carbohydrates, description, historicalOrigins) {
+        let dish = await this.prisma.dish.findUnique({
+            where: { name: foodName },
+        });
+        if (dish) {
+            const newCount = dish.appearanceCount + 1;
+            const oldWeight = dish.appearanceCount;
+            const newWeight = 1;
+            dish = await this.prisma.dish.update({
+                where: { id: dish.id },
+                data: {
+                    appearanceCount: newCount,
+                    averagePrice: this.updateWeightedAverage(dish.averagePrice, price, oldWeight, newWeight),
+                    averageCalories: this.updateWeightedAverage(dish.averageCalories, calories, oldWeight, newWeight),
+                    averageProtein: this.updateWeightedAverage(dish.averageProtein, protein, oldWeight, newWeight),
+                    averageFat: this.updateWeightedAverage(dish.averageFat, fat, oldWeight, newWeight),
+                    averageCarbs: this.updateWeightedAverage(dish.averageCarbs, carbohydrates, oldWeight, newWeight),
+                    description: description || dish.description,
+                    historicalOrigins: historicalOrigins || dish.historicalOrigins,
+                },
+            });
+            this.logger.log(`Updated dish statistics: ${foodName} (count: ${newCount})`);
+        }
+        else {
+            dish = await this.prisma.dish.create({
+                data: {
+                    name: foodName,
+                    cuisine,
+                    description,
+                    historicalOrigins,
+                    appearanceCount: 1,
+                    averagePrice: price,
+                    averageCalories: calories,
+                    averageProtein: protein,
+                    averageFat: fat,
+                    averageCarbs: carbohydrates,
+                },
+            });
+            this.logger.log(`Created new dish: ${foodName} (${cuisine})`);
+        }
+        return dish;
+    }
+    updateWeightedAverage(oldAverage, newValue, oldWeight, newWeight) {
+        if (newValue === undefined || newValue === null) {
+            return oldAverage;
+        }
+        if (oldAverage === null || oldAverage === undefined) {
+            return newValue;
+        }
+        return (oldAverage * oldWeight + newValue * newWeight) / (oldWeight + newWeight);
+    }
+    async getPopularDishes(limit = 10, cuisine) {
+        return this.prisma.dish.findMany({
+            where: cuisine ? { cuisine } : undefined,
+            orderBy: { appearanceCount: 'desc' },
+            take: limit,
+        });
+    }
+    async getDishByName(name) {
+        return this.prisma.dish.findUnique({
+            where: { name },
+        });
+    }
+};
+exports.DishesService = DishesService;
+exports.DishesService = DishesService = DishesService_1 = __decorate([
+    (0, common_1.Injectable)(),
+    __metadata("design:paramtypes", [prisma_service_1.PrismaService])
+], DishesService);
+//# sourceMappingURL=dishes.service.js.map
