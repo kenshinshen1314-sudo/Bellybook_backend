@@ -13,7 +13,9 @@ export class SettingsResponseDto {
   language!: 'ZH' | 'EN';
   theme!: 'LIGHT' | 'DARK' | 'AUTO';
   notificationsEnabled!: boolean;
-  reminderTime?: string;
+  breakfastReminderTime?: string;
+  lunchReminderTime?: string;
+  dinnerReminderTime?: string;
   hideRanking!: boolean;
 }
 

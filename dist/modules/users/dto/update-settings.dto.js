@@ -15,7 +15,9 @@ class UpdateSettingsDto {
     language;
     theme;
     notificationsEnabled;
-    reminderTime;
+    breakfastReminderTime;
+    lunchReminderTime;
+    dinnerReminderTime;
     hideRanking;
 }
 exports.UpdateSettingsDto = UpdateSettingsDto;
@@ -39,7 +41,19 @@ __decorate([
     (0, class_validator_1.IsString)(),
     (0, class_validator_1.Matches)(/^\d{2}:\d{2}$/),
     __metadata("design:type", String)
-], UpdateSettingsDto.prototype, "reminderTime", void 0);
+], UpdateSettingsDto.prototype, "breakfastReminderTime", void 0);
+__decorate([
+    (0, class_validator_1.IsOptional)(),
+    (0, class_validator_1.IsString)(),
+    (0, class_validator_1.Matches)(/^\d{2}:\d{2}$/),
+    __metadata("design:type", String)
+], UpdateSettingsDto.prototype, "lunchReminderTime", void 0);
+__decorate([
+    (0, class_validator_1.IsOptional)(),
+    (0, class_validator_1.IsString)(),
+    (0, class_validator_1.Matches)(/^\d{2}:\d{2}$/),
+    __metadata("design:type", String)
+], UpdateSettingsDto.prototype, "dinnerReminderTime", void 0);
 __decorate([
     (0, class_validator_1.IsOptional)(),
     (0, class_validator_1.IsBoolean)(),

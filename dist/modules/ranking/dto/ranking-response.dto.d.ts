@@ -55,8 +55,63 @@ export interface DishExpertEntry {
     dishCount: number;
     mealCount: number;
     dishes: string[];
+    cuisines: string[];
 }
 export interface DishExpertsDto {
     period: string;
     experts: DishExpertEntry[];
+}
+export interface CuisineExpertDishEntry {
+    dishName: string;
+    cuisine: string;
+    mealCount: number;
+    firstMealAt: string;
+    lastMealAt?: string;
+    imageUrl?: string;
+    calories?: number;
+    notes?: string;
+}
+export interface CuisineExpertDetailDto {
+    userId: string;
+    username: string;
+    avatarUrl: string | null;
+    cuisineName: string;
+    period: string;
+    totalDishes: number;
+    totalMeals: number;
+    dishes: CuisineExpertDishEntry[];
+}
+export interface UserCuisineStats {
+    rank: number;
+    userId: string;
+    username: string;
+    avatarUrl: string | null;
+    cuisineName: string;
+    dishCount: number;
+    mealCount: number;
+    firstMealAt: string;
+}
+export interface AllUsersDishesDto {
+    period: string;
+    totalEntries: number;
+    totalUsers: number;
+    totalCuisines: number;
+    entries: UserCuisineStats[];
+}
+export interface UnlockedDishEntry {
+    dishName: string;
+    cuisine: string;
+    mealCount: number;
+    firstMealAt: string;
+    lastMealAt: string;
+    imageUrl?: string;
+    calories?: number;
+}
+export interface UserUnlockedDishesDto {
+    userId: string;
+    username: string;
+    avatarUrl: string | null;
+    totalDishes: number;
+    totalMeals: number;
+    dishes: UnlockedDishEntry[];
 }

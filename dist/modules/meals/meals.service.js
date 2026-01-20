@@ -64,6 +64,12 @@ let MealsService = class MealsService {
         catch (error) {
             console.error(`Failed to update daily nutrition: ${error.message}`);
         }
+        try {
+            await this.updateDishUnlock(userId, foodName);
+        }
+        catch (error) {
+            console.error(`Failed to update dish unlock: ${error.message}`);
+        }
         return this.mapToMealResponse(meal);
     }
     async createPending(userId, dto) {
@@ -119,6 +125,12 @@ let MealsService = class MealsService {
         }
         catch (error) {
             console.error(`Failed to update daily nutrition: ${error.message}`);
+        }
+        try {
+            await this.updateDishUnlock(meal.userId, data.foodName);
+        }
+        catch (error) {
+            console.error(`Failed to update dish unlock: ${error.message}`);
         }
         return this.mapToMealResponse(updatedMeal);
     }
@@ -346,6 +358,33 @@ let MealsService = class MealsService {
                     lunchCount: meal.mealType === 'LUNCH' ? 1 : 0,
                     dinnerCount: meal.mealType === 'DINNER' ? 1 : 0,
                     snackCount: meal.mealType === 'SNACK' ? 1 : 0,
+                },
+            });
+        }
+    }
+    async updateDishUnlock(userId, dishName) {
+        const existing = await this.prisma.dish_unlocks.findUnique({
+            where: {
+                userId_dishName: { userId, dishName },
+            },
+        });
+        if (existing) {
+            await this.prisma.dish_unlocks.update({
+                where: { id: existing.id },
+                data: {
+                    mealCount: { increment: 1 },
+                    lastMealAt: new Date(),
+                },
+            });
+        }
+        else {
+            await this.prisma.dish_unlocks.create({
+                data: {
+                    userId,
+                    dishName,
+                    firstMealAt: new Date(),
+                    mealCount: 1,
+                    lastMealAt: new Date(),
                 },
             });
         }

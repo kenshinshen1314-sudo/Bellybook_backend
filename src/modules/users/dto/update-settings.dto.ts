@@ -16,7 +16,17 @@ export class UpdateSettingsDto {
   @IsOptional()
   @IsString()
   @Matches(/^\d{2}:\d{2}$/)
-  reminderTime?: string;
+  breakfastReminderTime?: string;
+
+  @IsOptional()
+  @IsString()
+  @Matches(/^\d{2}:\d{2}$/)
+  lunchReminderTime?: string;
+
+  @IsOptional()
+  @IsString()
+  @Matches(/^\d{2}:\d{2}$/)
+  dinnerReminderTime?: string;
 
   @IsOptional()
   @IsBoolean()

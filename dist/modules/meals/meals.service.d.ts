@@ -52,5 +52,6 @@ export declare class MealsService {
     }>;
     private updateCuisineUnlock;
     private updateDailyNutrition;
+    private updateDishUnlock;
     private mapToMealResponse;
 }

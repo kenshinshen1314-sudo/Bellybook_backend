@@ -14,7 +14,9 @@ class SettingsResponseDto {
     language;
     theme;
     notificationsEnabled;
-    reminderTime;
+    breakfastReminderTime;
+    lunchReminderTime;
+    dinnerReminderTime;
     hideRanking;
 }
 exports.SettingsResponseDto = SettingsResponseDto;

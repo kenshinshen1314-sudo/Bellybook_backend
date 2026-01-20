@@ -47,7 +47,17 @@ let AuthService = class AuthService {
             userData.email = dto.email;
         }
         const user = await this.prisma.user.create({
-            data: userData,
+            data: {
+                ...userData,
+                user_settings: {
+                    create: {},
+                },
+                user_profiles: {
+                    create: {
+                        displayName: dto.displayName || dto.username,
+                    },
+                },
+            },
         });
         const tokens = await this.generateTokens(user);
         await this.storeRefreshToken(user.id, tokens.refreshToken);

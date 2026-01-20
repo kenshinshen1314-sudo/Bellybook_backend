@@ -37,6 +37,15 @@ let RankingController = class RankingController {
     async getDishExperts(period = ranking_query_dto_1.RankingPeriod.ALL_TIME) {
         return this.rankingService.getDishExperts(period);
     }
+    async getCuisineExpertDetail(userId, cuisineName, period = ranking_query_dto_1.RankingPeriod.ALL_TIME) {
+        return this.rankingService.getCuisineExpertDetail(userId, cuisineName, period);
+    }
+    async getAllUsersDishes(period = ranking_query_dto_1.RankingPeriod.WEEKLY) {
+        return this.rankingService.getAllUsersDishes(period);
+    }
+    async getUserUnlockedDishes(userId) {
+        return this.rankingService.getUserUnlockedDishes(userId);
+    }
 };
 exports.RankingController = RankingController;
 __decorate([
@@ -76,6 +85,29 @@ __decorate([
     __metadata("design:paramtypes", [String]),
     __metadata("design:returntype", Promise)
 ], RankingController.prototype, "getDishExperts", null);
+__decorate([
+    (0, common_1.Get)('cuisine-expert-detail'),
+    __param(0, (0, common_1.Query)('userId')),
+    __param(1, (0, common_1.Query)('cuisineName')),
+    __param(2, (0, common_1.Query)('period')),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [String, String, String]),
+    __metadata("design:returntype", Promise)
+], RankingController.prototype, "getCuisineExpertDetail", null);
+__decorate([
+    (0, common_1.Get)('all-users-dishes'),
+    __param(0, (0, common_1.Query)('period')),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [String]),
+    __metadata("design:returntype", Promise)
+], RankingController.prototype, "getAllUsersDishes", null);
+__decorate([
+    (0, common_1.Get)('user-unlocked-dishes'),
+    __param(0, (0, common_1.Query)('userId')),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [String]),
+    __metadata("design:returntype", Promise)
+], RankingController.prototype, "getUserUnlockedDishes", null);
 exports.RankingController = RankingController = __decorate([
     (0, common_1.Controller)('ranking'),
     (0, common_1.UseGuards)(jwt_auth_guard_1.JwtAuthGuard),

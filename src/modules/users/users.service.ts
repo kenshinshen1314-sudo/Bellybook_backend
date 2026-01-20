@@ -6,7 +6,7 @@ import { ProfileResponseDto, SettingsResponseDto, UserStatsDto } from './dto/use
 
 @Injectable()
 export class UsersService {
-  constructor(private prisma: PrismaService) {}
+  constructor(private prisma: PrismaService) { }
 
   /**
    * 检查用户今日 AI 分析配额
@@ -91,7 +91,12 @@ export class UsersService {
         id: userId,
         username: '',
         passwordHash: '',
-        reminderTime: '12:00',
+        breakfastReminderTime: '08:00',
+        lunchReminderTime: '12:00',
+        dinnerReminderTime: '18:00',
+        user_settings: {
+          create: {},
+        },
         user_profiles: {
           create: {
             displayName: dto.displayName || '',
@@ -146,7 +151,9 @@ export class UsersService {
         id: userId,
         username: '',
         passwordHash: '',
-        reminderTime: '12:00',
+        breakfastReminderTime: '08:00',
+        lunchReminderTime: '12:00',
+        dinnerReminderTime: '18:00',
         user_settings: {
           create: dto,
         },
@@ -309,7 +316,9 @@ export class UsersService {
       language: settings.language || 'ZH',
       theme: settings.theme || 'AUTO',
       notificationsEnabled: settings.notificationsEnabled ?? true,
-      reminderTime: settings.reminderTime || null,
+      breakfastReminderTime: settings.breakfastReminderTime || null,
+      lunchReminderTime: settings.lunchReminderTime || null,
+      dinnerReminderTime: settings.dinnerReminderTime || null,
       hideRanking: settings.hideRanking || false,
     };
   }

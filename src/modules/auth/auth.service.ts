@@ -19,7 +19,7 @@ export class AuthService {
   constructor(
     private prisma: PrismaService,
     private jwtService: JwtService,
-  ) {}
+  ) { }
 
   async register(dto: RegisterDto): Promise<AuthResponseDto> {
     const existingUser = await this.prisma.user.findFirst({
@@ -53,7 +53,17 @@ export class AuthService {
     }
 
     const user = await this.prisma.user.create({
-      data: userData,
+      data: {
+        ...userData,
+        user_settings: {
+          create: {},
+        },
+        user_profiles: {
+          create: {
+            displayName: dto.displayName || dto.username,
+          },
+        },
+      },
     });
 
     const tokens = await this.generateTokens(user);
