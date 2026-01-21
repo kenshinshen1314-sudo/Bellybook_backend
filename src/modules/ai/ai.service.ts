@@ -125,13 +125,23 @@ export class AiService implements OnModuleInit {
         const response = await result.response;
         const text = response.text();
 
+        // 记录原始响应用于调试（截取前500字符）
+        this.logger.debug(`AI raw response (first 500 chars): ${text.substring(0, 500)}`);
+
         // 提取 JSON（去除可能的 markdown 标记）
         const jsonMatch = text.match(/\{[\s\S]*\}/);
         if (!jsonMatch) {
-          throw new Error('Invalid response format from AI');
+          this.logger.error(`AI response format error. Response length: ${text.length}, Response: ${text}`);
+          throw new Error(`Invalid response format from AI. Response: ${text.substring(0, 200)}...`);
         }
 
-        const analysis: AiRawResponse = JSON.parse(jsonMatch[0]);
+        let analysis: AiRawResponse;
+        try {
+          analysis = JSON.parse(jsonMatch[0]);
+        } catch (parseError) {
+          this.logger.error(`Failed to parse JSON: ${jsonMatch[0]}`);
+          throw new Error(`AI returned invalid JSON format: ${(parseError as Error).message}`);
+        }
 
         // 统一规范化为 dishes 数组结构
         const normalizedDishes = this.normalizeDishes(analysis);

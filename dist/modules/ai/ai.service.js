@@ -55,11 +55,20 @@ let AiService = AiService_1 = class AiService {
                 ]);
                 const response = await result.response;
                 const text = response.text();
+                this.logger.debug(`AI raw response (first 500 chars): ${text.substring(0, 500)}`);
                 const jsonMatch = text.match(/\{[\s\S]*\}/);
                 if (!jsonMatch) {
-                    throw new Error('Invalid response format from AI');
+                    this.logger.error(`AI response format error. Response length: ${text.length}, Response: ${text}`);
+                    throw new Error(`Invalid response format from AI. Response: ${text.substring(0, 200)}...`);
                 }
-                const analysis = JSON.parse(jsonMatch[0]);
+                let analysis;
+                try {
+                    analysis = JSON.parse(jsonMatch[0]);
+                }
+                catch (parseError) {
+                    this.logger.error(`Failed to parse JSON: ${jsonMatch[0]}`);
+                    throw new Error(`AI returned invalid JSON format: ${parseError.message}`);
+                }
                 const normalizedDishes = this.normalizeDishes(analysis);
                 const totalNutrition = this.calculateTotalNutrition(normalizedDishes);
                 const foodNamePoetic = `${this.getTimePrefix()}${normalizedDishes[0].foodName}${this.getPoeticSuffix()}`;
