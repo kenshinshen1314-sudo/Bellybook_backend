@@ -4,8 +4,11 @@ const core_1 = require("@nestjs/core");
 const common_1 = require("@nestjs/common");
 const app_module_1 = require("./app.module");
 const env_1 = require("./config/env");
+const all_exceptions_filter_1 = require("./common/filters/all-exceptions.filter");
 async function bootstrap() {
     const app = await core_1.NestFactory.create(app_module_1.AppModule);
+    const logger = new common_1.Logger('Bootstrap');
+    app.useGlobalFilters(new all_exceptions_filter_1.AllExceptionsFilter());
     app.enableVersioning({
         type: common_1.VersioningType.URI,
         defaultVersion: '1',
@@ -24,7 +27,9 @@ async function bootstrap() {
         },
     }));
     await app.listen(env_1.env.PORT);
-    console.log(`🚀 Application is running on: http://localhost:${env_1.env.PORT}/api/v1`);
+    logger.log(`🚀 Application is running on: http://localhost:${env_1.env.PORT}/api/v1`);
+    logger.log(`📚 Environment: ${env_1.env.NODE_ENV}`);
+    logger.log(`🔐 CORS origins: ${env_1.env.CORS_ORIGIN}`);
 }
 bootstrap();
 //# sourceMappingURL=main.js.map

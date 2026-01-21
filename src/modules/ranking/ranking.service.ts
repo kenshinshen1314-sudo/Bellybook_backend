@@ -1,5 +1,19 @@
+/**
+ * [INPUT]: 依赖 PrismaService 的数据库访问能力
+ * [OUTPUT]: 对外提供排行榜、菜系专家、美食家、菜品专家统计
+ * [POS]: ranking 模块的核心服务层，被 ranking.controller 消费
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ *
+ * [PERFORMANCE NOTE]
+ * 当前实现在内存中进行聚合计算，适合中小规模数据（<10000 meals）。
+ * 如需优化，可考虑：
+ * - 使用数据库视图预计算统计数据
+ * - 添加 Redis 缓存层（TTL: 5分钟）
+ * - 使用 Prisma 的 groupBy 或原始 SQL 聚合查询
+ */
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../database/prisma.service';
+import { Prisma } from '@prisma/client';
 import { CuisineMastersDto, LeaderboardDto, RankingStatsDto, GourmetsDto, DishExpertsDto, CuisineMasterEntry, LeaderboardEntry, GourmetEntry, DishExpertEntry, CuisineExpertDetailDto, CuisineExpertDishEntry, AllUsersDishesDto, UserUnlockedDishesDto, UnlockedDishEntry } from './dto/ranking-response.dto';
 import { RankingPeriod } from './dto/ranking-query.dto';
 
@@ -38,7 +52,7 @@ export class RankingService {
     const userMap = new Map(usersWithSettings.map(u => [u.id, u]));
 
     // 构建查询条件
-    const where: any = {
+    const where: Prisma.MealWhereInput = {
       userId: { in: userIds },
       deletedAt: null,
     };
@@ -165,7 +179,7 @@ export class RankingService {
           { user_settings: { is: null } },
           { user_settings: { hideRanking: false } },
         ],
-        ...(tier && { subscriptionTier: tier as any }),
+        ...(tier && { subscriptionTier: tier as Prisma.EnumSubscriptionTierFilter }),
       },
       select: {
         id: true,
@@ -178,7 +192,7 @@ export class RankingService {
     const userMap = new Map(users.map(u => [u.id, u]));
 
     // 构建查询条件
-    const where: any = {
+    const where: Prisma.MealWhereInput = {
       userId: { in: userIds },
       deletedAt: null,
     };
@@ -340,7 +354,7 @@ export class RankingService {
     const userMap = new Map(users.map(u => [u.id, u]));
 
     // 构建查询条件
-    const where: any = {
+    const where: Prisma.MealWhereInput = {
       userId: { in: Array.from(userMap.keys()) },
       deletedAt: null,
     };
@@ -593,7 +607,7 @@ export class RankingService {
     }
 
     // 构建查询条件
-    const where: any = {
+    const where: Prisma.MealWhereInput = {
       userId,
       cuisine: cuisineName,
       deletedAt: null,
@@ -699,7 +713,7 @@ export class RankingService {
     const userMap = new Map(allUsers.map(u => [u.id, u]));
 
     // 构建查询条件
-    const where: any = {
+    const where: Prisma.MealWhereInput = {
       userId: { in: userIds },
       deletedAt: null,
     };
