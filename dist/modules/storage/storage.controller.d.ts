@@ -23,32 +23,7 @@ export declare class StorageController {
             key: string;
             size: number;
         };
-        analysis: {
-            dishes: Array<{
-                foodName: string;
-                cuisine: string;
-                nutrition: {
-                    calories: number;
-                    protein: number;
-                    fat: number;
-                    carbohydrates: number;
-                };
-            }>;
-            nutrition: {
-                calories: number;
-                protein: number;
-                fat: number;
-                carbohydrates: number;
-            };
-            plating?: string;
-            description?: string;
-            ingredients?: string[];
-            historicalOrigins?: string;
-            poeticDescription?: string;
-            foodNamePoetic?: string;
-            foodPrice?: number;
-            dishSuggestion?: string;
-        };
+        analysis: import("../ai/ai-types").FoodAnalysisResult;
         meal: import("../meals/dto/meal-response.dto").MealResponseDto;
         quota: {
             limit: number;

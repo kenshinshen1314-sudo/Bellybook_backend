@@ -35,6 +35,148 @@ let AiService = AiService_1 = class AiService {
         }
         this.genAI = new generative_ai_1.GoogleGenerativeAI(env_1.env.GEMINI_API_KEY || '');
     }
+    async analyzeFoodImage(imageBase64) {
+        let lastError;
+        for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+            try {
+                const model = this.genAI.getGenerativeModel({
+                    model: env_1.env.GEMINI_MODEL,
+                });
+                const diningTimeScenery = this.getDiningTimeScenery();
+                const prompt = this.buildPrompt(diningTimeScenery);
+                const result = await model.generateContent([
+                    prompt,
+                    {
+                        inlineData: {
+                            data: imageBase64,
+                            mimeType: 'image/jpeg',
+                        },
+                    },
+                ]);
+                const response = await result.response;
+                const text = response.text();
+                const jsonMatch = text.match(/\{[\s\S]*\}/);
+                if (!jsonMatch) {
+                    throw new Error('Invalid response format from AI');
+                }
+                const analysis = JSON.parse(jsonMatch[0]);
+                const normalizedDishes = this.normalizeDishes(analysis);
+                const totalNutrition = this.calculateTotalNutrition(normalizedDishes);
+                const foodNamePoetic = `${this.getTimePrefix()}${normalizedDishes[0].foodName}${this.getPoeticSuffix()}`;
+                const ingredients = analysis.ingredients || [];
+                if (!Array.isArray(ingredients) || ingredients.length < 2) {
+                    this.logger.warn(`Ingredients list is incomplete: ${JSON.stringify(ingredients)}`);
+                }
+                this.logger.log(`Successfully analyzed ${normalizedDishes.length} dish(es)`);
+                return {
+                    dishes: normalizedDishes,
+                    nutrition: totalNutrition,
+                    plating: analysis.plating,
+                    description: analysis.description,
+                    ingredients: ingredients,
+                    historicalOrigins: analysis.historicalOrigins,
+                    poeticDescription: analysis.poeticDescription,
+                    foodNamePoetic,
+                    foodPrice: analysis.foodPrice ? Number(analysis.foodPrice) : undefined,
+                    dishSuggestion: analysis.dishSuggestion,
+                };
+            }
+            catch (error) {
+                lastError = error;
+                if (error instanceof SyntaxError) {
+                    this.logger.error('Failed to parse AI response as JSON', error.stack);
+                    throw new Error('AI returned invalid JSON format');
+                }
+                if (this.isRetriableError(error) && attempt < MAX_RETRIES - 1) {
+                    const delayMs = BASE_DELAY_MS * Math.pow(2, attempt);
+                    this.logger.warn(`AI analysis attempt ${attempt + 1} failed (${this.extractErrorCode(error)}): ${error.message}. ` +
+                        `Retrying in ${delayMs}ms...`);
+                    await this.delay(delayMs);
+                    continue;
+                }
+                break;
+            }
+        }
+        const errorMessage = lastError instanceof Error ? lastError.message : 'Unknown error';
+        const errorStack = lastError instanceof Error ? lastError.stack : undefined;
+        this.logger.error(`Failed to analyze food image after ${MAX_RETRIES} attempts: ${errorMessage}`, errorStack);
+        throw lastError;
+    }
+    imageToBase64(buffer) {
+        return buffer.toString('base64');
+    }
+    normalizeDishes(analysis) {
+        if (analysis.dishes && Array.isArray(analysis.dishes) && analysis.dishes.length > 0) {
+            return analysis.dishes.map((dish) => ({
+                foodName: dish.foodName || '未知菜品',
+                cuisine: dish.cuisine || '其他',
+                nutrition: this.validateAndNormalizeNutrition(dish.nutrition),
+            }));
+        }
+        else if (analysis.foodName) {
+            return [{
+                    foodName: analysis.foodName,
+                    cuisine: analysis.cuisine || '其他',
+                    nutrition: this.validateAndNormalizeNutrition(analysis.nutrition),
+                }];
+        }
+        else {
+            throw new Error('Invalid AI response: neither dishes nor foodName found');
+        }
+    }
+    calculateTotalNutrition(dishes) {
+        return dishes.reduce((acc, dish) => ({
+            calories: acc.calories + dish.nutrition.calories,
+            protein: acc.protein + dish.nutrition.protein,
+            fat: acc.fat + dish.nutrition.fat,
+            carbohydrates: acc.carbohydrates + dish.nutrition.carbohydrates,
+        }), { calories: 0, protein: 0, fat: 0, carbohydrates: 0 });
+    }
+    validateAndNormalizeNutrition(nutrition) {
+        const calories = Number(nutrition?.calories) || 0;
+        const protein = Number(nutrition?.protein) || 0;
+        const fat = Number(nutrition?.fat) || 0;
+        const carbohydrates = Number(nutrition?.carbohydrates) || 0;
+        if (calories < 0 || calories > 5000) {
+            this.logger.warn(`Unusual calories detected: ${calories}, using fallback`);
+            return { calories: 300, protein: 15, fat: 20, carbohydrates: 40 };
+        }
+        if (protein < 0 || protein > 200) {
+            this.logger.warn(`Unusual protein detected: ${protein}, normalizing`);
+        }
+        if (fat < 0 || fat > 200) {
+            this.logger.warn(`Unusual fat detected: ${fat}, normalizing`);
+        }
+        if (carbohydrates < 0 || carbohydrates > 500) {
+            this.logger.warn(`Unusual carbohydrates detected: ${carbohydrates}, normalizing`);
+        }
+        return {
+            calories: Math.max(0, Math.min(5000, calories)),
+            protein: Math.max(0, Math.min(200, protein)),
+            fat: Math.max(0, Math.min(200, fat)),
+            carbohydrates: Math.max(0, Math.min(500, carbohydrates)),
+        };
+    }
+    isRetriableError(error) {
+        const aiError = error;
+        if (aiError.status === 503)
+            return true;
+        if (aiError.status === 429)
+            return true;
+        if (aiError.status === 500)
+            return true;
+        if (aiError.status === 502)
+            return true;
+        if (aiError.status === 504)
+            return true;
+        if (aiError.code === 'ECONNRESET' || aiError.code === 'ETIMEDOUT' || aiError.code === 'ENOTFOUND')
+            return true;
+        return false;
+    }
+    extractErrorCode(error) {
+        const aiError = error;
+        return aiError.status?.toString() || aiError.code || 'unknown';
+    }
     getTimePeriod() {
         const hour = new Date().getHours();
         if (hour >= 5 && hour < 9)
@@ -81,58 +223,11 @@ let AiService = AiService_1 = class AiService {
         const suffixes = ['私语', '低语', '独白', '絮语', '慰藉'];
         return suffixes[Math.floor(Math.random() * suffixes.length)];
     }
-    _validateAndNormalizeNutrition(nutrition) {
-        const calories = Number(nutrition?.calories) || 0;
-        const protein = Number(nutrition?.protein) || 0;
-        const fat = Number(nutrition?.fat) || 0;
-        const carbohydrates = Number(nutrition?.carbohydrates) || 0;
-        if (calories < 0 || calories > 5000) {
-            this.logger.warn(`Unusual calories detected: ${calories}, using fallback`);
-            return { calories: 300, protein: 15, fat: 20, carbohydrates: 40 };
-        }
-        if (protein < 0 || protein > 200) {
-            this.logger.warn(`Unusual protein detected: ${protein}, normalizing`);
-        }
-        if (fat < 0 || fat > 200) {
-            this.logger.warn(`Unusual fat detected: ${fat}, normalizing`);
-        }
-        if (carbohydrates < 0 || carbohydrates > 500) {
-            this.logger.warn(`Unusual carbohydrates detected: ${carbohydrates}, normalizing`);
-        }
-        return {
-            calories: Math.max(0, Math.min(5000, calories)),
-            protein: Math.max(0, Math.min(200, protein)),
-            fat: Math.max(0, Math.min(200, fat)),
-            carbohydrates: Math.max(0, Math.min(500, carbohydrates)),
-        };
-    }
     delay(ms) {
         return new Promise(resolve => setTimeout(resolve, ms));
     }
-    isRetriableError(error) {
-        if (error?.status === 503)
-            return true;
-        if (error?.status === 429)
-            return true;
-        if (error?.status === 500)
-            return true;
-        if (error?.status === 502)
-            return true;
-        if (error?.status === 504)
-            return true;
-        if (error?.code === 'ECONNRESET' || error?.code === 'ETIMEDOUT' || error?.code === 'ENOTFOUND')
-            return true;
-        return false;
-    }
-    async analyzeFoodImage(imageBase64) {
-        let lastError;
-        for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
-            try {
-                const model = this.genAI.getGenerativeModel({
-                    model: env_1.env.GEMINI_MODEL,
-                });
-                const diningTimeScenery = this.getDiningTimeScenery();
-                const prompt = `你是一位专业的美食分析师。请仔细分析这张食物图片，并严格按照以下 JSON 格式返回分析结果。
+    buildPrompt(diningTimeScenery) {
+        return `你是一位专业的美食分析师。请仔细分析这张食物图片，并严格按照以下 JSON 格式返回分析结果。
 
 ## 输出要求
 1. 必须是纯 JSON 格式，不要使用 markdown 代码块（不要用 \`\`\`json 包裹）
@@ -187,91 +282,6 @@ let AiService = AiService_1 = class AiService {
 }
 
 现在请分析这张图片，返回纯 JSON 格式：`;
-                const result = await model.generateContent([
-                    prompt,
-                    {
-                        inlineData: {
-                            data: imageBase64,
-                            mimeType: 'image/jpeg',
-                        },
-                    },
-                ]);
-                const response = await result.response;
-                const text = response.text();
-                const jsonMatch = text.match(/\{[\s\S]*\}/);
-                if (!jsonMatch) {
-                    throw new Error('Invalid response format from AI');
-                }
-                const analysis = JSON.parse(jsonMatch[0]);
-                let normalizedDishes = [];
-                if (analysis.dishes && Array.isArray(analysis.dishes) && analysis.dishes.length > 0) {
-                    normalizedDishes = analysis.dishes.map((dish) => ({
-                        foodName: dish.foodName || '未知菜品',
-                        cuisine: dish.cuisine || '其他',
-                        nutrition: this._validateAndNormalizeNutrition(dish.nutrition),
-                    }));
-                }
-                else if (analysis.foodName) {
-                    normalizedDishes = [{
-                            foodName: analysis.foodName,
-                            cuisine: analysis.cuisine || '其他',
-                            nutrition: this._validateAndNormalizeNutrition(analysis.nutrition),
-                        }];
-                }
-                else {
-                    throw new Error('Invalid AI response: neither dishes nor foodName found');
-                }
-                const ingredients = analysis.ingredients || [];
-                if (!Array.isArray(ingredients) || ingredients.length < 2) {
-                    this.logger.warn(`Ingredients list is incomplete: ${JSON.stringify(ingredients)}`);
-                }
-                const totalNutrition = normalizedDishes.reduce((acc, dish) => ({
-                    calories: acc.calories + dish.nutrition.calories,
-                    protein: acc.protein + dish.nutrition.protein,
-                    fat: acc.fat + dish.nutrition.fat,
-                    carbohydrates: acc.carbohydrates + dish.nutrition.carbohydrates,
-                }), { calories: 0, protein: 0, fat: 0, carbohydrates: 0 });
-                const foodNamePoetic = `${this.getTimePrefix()}${normalizedDishes[0].foodName}${this.getPoeticSuffix()}`;
-                this.logger.log(`Successfully analyzed ${normalizedDishes.length} dish(es)`);
-                return {
-                    dishes: normalizedDishes,
-                    nutrition: {
-                        calories: totalNutrition.calories,
-                        protein: totalNutrition.protein,
-                        fat: totalNutrition.fat,
-                        carbohydrates: totalNutrition.carbohydrates,
-                    },
-                    plating: analysis.plating,
-                    description: analysis.description,
-                    ingredients: ingredients,
-                    historicalOrigins: analysis.historicalOrigins,
-                    poeticDescription: analysis.poeticDescription,
-                    foodNamePoetic,
-                    foodPrice: analysis.foodPrice ? Number(analysis.foodPrice) : undefined,
-                    dishSuggestion: analysis.dishSuggestion,
-                };
-            }
-            catch (error) {
-                lastError = error;
-                if (error instanceof SyntaxError) {
-                    this.logger.error('Failed to parse AI response as JSON', error.stack);
-                    throw new Error('AI returned invalid JSON format');
-                }
-                if (this.isRetriableError(error) && attempt < MAX_RETRIES - 1) {
-                    const delayMs = BASE_DELAY_MS * Math.pow(2, attempt);
-                    this.logger.warn(`AI analysis attempt ${attempt + 1} failed (${error.status || error.code || 'unknown'}): ${error.message}. ` +
-                        `Retrying in ${delayMs}ms...`);
-                    await this.delay(delayMs);
-                    continue;
-                }
-                break;
-            }
-        }
-        this.logger.error(`Failed to analyze food image after ${MAX_RETRIES} attempts: ${lastError.message}`, lastError.stack);
-        throw lastError;
-    }
-    imageToBase64(buffer) {
-        return buffer.toString('base64');
     }
 };
 exports.AiService = AiService;

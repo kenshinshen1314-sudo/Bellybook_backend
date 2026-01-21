@@ -1,15 +1,70 @@
+/**
+ * [INPUT]: 依赖 Google Generative AI 的图像分析能力
+ * [OUTPUT]: 对外提供食物图像分析、营养计算、诗意描述生成
+ * [POS]: ai 模块的核心服务层，被 storage.controller 消费
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { env } from '../../config/env';
 import { HttpsProxyAgent } from 'https-proxy-agent';
+import { FoodAnalysisResult } from './ai-types';
 
 const MAX_RETRIES = 3;
 const BASE_DELAY_MS = 1000;
+
+/**
+ * AI 错误类型（用于判断是否可重试）
+ */
+interface AiError extends Error {
+  status?: number;
+  code?: string;
+}
+
+/**
+ * 营养数据输入（来自 AI）
+ */
+interface NutritionInput {
+  calories?: number | string;
+  protein?: number | string;
+  fat?: number | string;
+  carbohydrates?: number | string;
+}
+
+/**
+ * 菜品数据输入（来自 AI）
+ */
+interface DishInput {
+  foodName?: string;
+  cuisine?: string;
+  nutrition?: NutritionInput;
+}
+
+/**
+ * AI 原始响应
+ */
+interface AiRawResponse {
+  foodName?: string;
+  cuisine?: string;
+  dishes?: DishInput[];
+  nutrition?: NutritionInput;
+  plating?: string;
+  description?: string;
+  ingredients?: string[];
+  historicalOrigins?: string;
+  poeticDescription?: string;
+  foodPrice?: number | string;
+  dishSuggestion?: string;
+}
 
 @Injectable()
 export class AiService implements OnModuleInit {
   private readonly logger = new Logger(AiService.name);
   private genAI: GoogleGenerativeAI;
+
+  // ============================================================
+  // Lifecycle Hooks
+  // ============================================================
 
   async onModuleInit() {
     // 配置代理（如果设置了）
@@ -35,6 +90,246 @@ export class AiService implements OnModuleInit {
 
     this.genAI = new GoogleGenerativeAI(env.GEMINI_API_KEY || '');
   }
+
+  // ============================================================
+  // Public Methods
+  // ============================================================
+
+  /**
+   * 分析食物图像并返回营养信息
+   * 统一 API 契约：始终返回 dishes 数组（单菜品也是数组长度为 1）
+   */
+  async analyzeFoodImage(imageBase64: string): Promise<FoodAnalysisResult> {
+    let lastError: unknown;
+
+    for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+      try {
+        const model = this.genAI.getGenerativeModel({
+          model: env.GEMINI_MODEL,
+        });
+
+        const diningTimeScenery = this.getDiningTimeScenery();
+        const prompt = this.buildPrompt(diningTimeScenery);
+
+        // 调用 Gemini API 进行图像分析
+        const result = await model.generateContent([
+          prompt,
+          {
+            inlineData: {
+              data: imageBase64,
+              mimeType: 'image/jpeg',
+            },
+          },
+        ]);
+
+        const response = await result.response;
+        const text = response.text();
+
+        // 提取 JSON（去除可能的 markdown 标记）
+        const jsonMatch = text.match(/\{[\s\S]*\}/);
+        if (!jsonMatch) {
+          throw new Error('Invalid response format from AI');
+        }
+
+        const analysis: AiRawResponse = JSON.parse(jsonMatch[0]);
+
+        // 统一规范化为 dishes 数组结构
+        const normalizedDishes = this.normalizeDishes(analysis);
+
+        // 计算总营养（所有菜品的总和）
+        const totalNutrition = this.calculateTotalNutrition(normalizedDishes);
+
+        // 生成诗意化的食物名称
+        const foodNamePoetic = `${this.getTimePrefix()}${normalizedDishes[0].foodName}${this.getPoeticSuffix()}`;
+
+        // 验证食材列表
+        const ingredients = analysis.ingredients || [];
+        if (!Array.isArray(ingredients) || ingredients.length < 2) {
+          this.logger.warn(`Ingredients list is incomplete: ${JSON.stringify(ingredients)}`);
+        }
+
+        this.logger.log(`Successfully analyzed ${normalizedDishes.length} dish(es)`);
+
+        return {
+          dishes: normalizedDishes,
+          nutrition: totalNutrition,
+          plating: analysis.plating,
+          description: analysis.description,
+          ingredients: ingredients,
+          historicalOrigins: analysis.historicalOrigins,
+          poeticDescription: analysis.poeticDescription,
+          foodNamePoetic,
+          foodPrice: analysis.foodPrice ? Number(analysis.foodPrice) : undefined,
+          dishSuggestion: analysis.dishSuggestion,
+        };
+      } catch (error) {
+        lastError = error;
+
+        // JSON 解析错误不重试
+        if (error instanceof SyntaxError) {
+          this.logger.error('Failed to parse AI response as JSON', (error as Error).stack);
+          throw new Error('AI returned invalid JSON format');
+        }
+
+        // 检查是否为可重试的错误
+        if (this.isRetriableError(error) && attempt < MAX_RETRIES - 1) {
+          const delayMs = BASE_DELAY_MS * Math.pow(2, attempt);
+          this.logger.warn(
+            `AI analysis attempt ${attempt + 1} failed (${this.extractErrorCode(error)}): ${(error as Error).message}. ` +
+            `Retrying in ${delayMs}ms...`
+          );
+          await this.delay(delayMs);
+          continue;
+        }
+
+        // 不可重试的错误或已达到最大重试次数
+        break;
+      }
+    }
+
+    // 所有重试都失败
+    const errorMessage = lastError instanceof Error ? lastError.message : 'Unknown error';
+    const errorStack = lastError instanceof Error ? lastError.stack : undefined;
+    this.logger.error(
+      `Failed to analyze food image after ${MAX_RETRIES} attempts: ${errorMessage}`,
+      errorStack
+    );
+    throw lastError;
+  }
+
+  /**
+   * 将图片文件转换为 base64
+   */
+  imageToBase64(buffer: Buffer): string {
+    return buffer.toString('base64');
+  }
+
+  // ============================================================
+  // Private Methods - Data Normalization
+  // ============================================================
+
+  /**
+   * 规范化菜品数据为统一格式
+   */
+  private normalizeDishes(analysis: AiRawResponse): Array<{
+    foodName: string;
+    cuisine: string;
+    nutrition: {
+      calories: number;
+      protein: number;
+      fat: number;
+      carbohydrates: number;
+    };
+  }> {
+    // 如果 AI 返回了 dishes 数组，使用它；否则将单菜品包装成数组
+    if (analysis.dishes && Array.isArray(analysis.dishes) && analysis.dishes.length > 0) {
+      return analysis.dishes.map((dish: DishInput) => ({
+        foodName: dish.foodName || '未知菜品',
+        cuisine: dish.cuisine || '其他',
+        nutrition: this.validateAndNormalizeNutrition(dish.nutrition),
+      }));
+    } else if (analysis.foodName) {
+      // 单菜品模式：包装成数组
+      return [{
+        foodName: analysis.foodName,
+        cuisine: analysis.cuisine || '其他',
+        nutrition: this.validateAndNormalizeNutrition(analysis.nutrition),
+      }];
+    } else {
+      throw new Error('Invalid AI response: neither dishes nor foodName found');
+    }
+  }
+
+  /**
+   * 计算总营养（所有菜品的总和）
+   */
+  private calculateTotalNutrition(dishes: Array<{ nutrition: { calories: number; protein: number; fat: number; carbohydrates: number } }>) {
+    return dishes.reduce(
+      (acc, dish) => ({
+        calories: acc.calories + dish.nutrition.calories,
+        protein: acc.protein + dish.nutrition.protein,
+        fat: acc.fat + dish.nutrition.fat,
+        carbohydrates: acc.carbohydrates + dish.nutrition.carbohydrates,
+      }),
+      { calories: 0, protein: 0, fat: 0, carbohydrates: 0 }
+    );
+  }
+
+  /**
+   * 验证并规范化营养数据
+   * 清洗 AI 返回的原始数据，确保在合理范围内
+   */
+  private validateAndNormalizeNutrition(nutrition?: NutritionInput): {
+    calories: number;
+    protein: number;
+    fat: number;
+    carbohydrates: number;
+  } {
+    const calories = Number(nutrition?.calories) || 0;
+    const protein = Number(nutrition?.protein) || 0;
+    const fat = Number(nutrition?.fat) || 0;
+    const carbohydrates = Number(nutrition?.carbohydrates) || 0;
+
+    // 验证并修正异常值
+    if (calories < 0 || calories > 5000) {
+      this.logger.warn(`Unusual calories detected: ${calories}, using fallback`);
+      return { calories: 300, protein: 15, fat: 20, carbohydrates: 40 };
+    }
+    if (protein < 0 || protein > 200) {
+      this.logger.warn(`Unusual protein detected: ${protein}, normalizing`);
+    }
+    if (fat < 0 || fat > 200) {
+      this.logger.warn(`Unusual fat detected: ${fat}, normalizing`);
+    }
+    if (carbohydrates < 0 || carbohydrates > 500) {
+      this.logger.warn(`Unusual carbohydrates detected: ${carbohydrates}, normalizing`);
+    }
+
+    return {
+      calories: Math.max(0, Math.min(5000, calories)),
+      protein: Math.max(0, Math.min(200, protein)),
+      fat: Math.max(0, Math.min(200, fat)),
+      carbohydrates: Math.max(0, Math.min(500, carbohydrates)),
+    };
+  }
+
+  // ============================================================
+  // Private Methods - Error Handling
+  // ============================================================
+
+  /**
+   * 判断错误是否为可重试的错误
+   */
+  private isRetriableError(error: unknown): boolean {
+    const aiError = error as AiError;
+
+    // 503 Service Unavailable - 服务过载
+    if (aiError.status === 503) return true;
+    // 429 Too Many Requests - 速率限制
+    if (aiError.status === 429) return true;
+    // 500 Internal Server Error - 服务器错误
+    if (aiError.status === 500) return true;
+    // 502 Bad Gateway
+    if (aiError.status === 502) return true;
+    // 504 Gateway Timeout
+    if (aiError.status === 504) return true;
+    // 网络错误
+    if (aiError.code === 'ECONNRESET' || aiError.code === 'ETIMEDOUT' || aiError.code === 'ENOTFOUND') return true;
+
+    return false;
+  }
+
+  /**
+   * 提取错误代码（用于日志）
+   */
+  private extractErrorCode(error: unknown): string {
+    const aiError = error as AiError;
+    return aiError.status?.toString() || aiError.code || 'unknown';
+  }
+
+  // ============================================================
+  // Private Methods - Time & Description Helpers
+  // ============================================================
 
   /**
    * 根据时间获取时段描述
@@ -84,44 +379,6 @@ export class AiService implements OnModuleInit {
   }
 
   /**
-   * 验证并规范化营养数据
-   * 清洗 AI 返回的原始数据，确保在合理范围内
-   */
-  private _validateAndNormalizeNutrition(nutrition: any): {
-    calories: number;
-    protein: number;
-    fat: number;
-    carbohydrates: number;
-  } {
-    const calories = Number(nutrition?.calories) || 0;
-    const protein = Number(nutrition?.protein) || 0;
-    const fat = Number(nutrition?.fat) || 0;
-    const carbohydrates = Number(nutrition?.carbohydrates) || 0;
-
-    // 验证并修正异常值
-    if (calories < 0 || calories > 5000) {
-      this.logger.warn(`Unusual calories detected: ${calories}, using fallback`);
-      return { calories: 300, protein: 15, fat: 20, carbohydrates: 40 };
-    }
-    if (protein < 0 || protein > 200) {
-      this.logger.warn(`Unusual protein detected: ${protein}, normalizing`);
-    }
-    if (fat < 0 || fat > 200) {
-      this.logger.warn(`Unusual fat detected: ${fat}, normalizing`);
-    }
-    if (carbohydrates < 0 || carbohydrates > 500) {
-      this.logger.warn(`Unusual carbohydrates detected: ${carbohydrates}, normalizing`);
-    }
-
-    return {
-      calories: Math.max(0, Math.min(5000, calories)),
-      protein: Math.max(0, Math.min(200, protein)),
-      fat: Math.max(0, Math.min(200, fat)),
-      carbohydrates: Math.max(0, Math.min(500, carbohydrates)),
-    };
-  }
-
-  /**
    * 延迟函数，用于重试间隔
    */
   private delay(ms: number): Promise<void> {
@@ -129,69 +386,10 @@ export class AiService implements OnModuleInit {
   }
 
   /**
-   * 判断错误是否为可重试的错误
+   * 构建 AI 提示词
    */
-  private isRetriableError(error: any): boolean {
-    // 503 Service Unavailable - 服务过载
-    if (error?.status === 503) return true;
-    // 429 Too Many Requests - 速率限制
-    if (error?.status === 429) return true;
-    // 500 Internal Server Error - 服务器错误
-    if (error?.status === 500) return true;
-    // 502 Bad Gateway
-    if (error?.status === 502) return true;
-    // 504 Gateway Timeout
-    if (error?.status === 504) return true;
-    // 网络错误
-    if (error?.code === 'ECONNRESET' || error?.code === 'ETIMEDOUT' || error?.code === 'ENOTFOUND') return true;
-    return false;
-  }
-
-  /**
-   * 分析食物图像并返回营养信息
-   * 统一 API 契约：始终返回 dishes 数组（单菜品也是数组长度为 1）
-   */
-  async analyzeFoodImage(imageBase64: string): Promise<{
-    // 核心：菜品数组（统一数据结构）
-    dishes: Array<{
-      foodName: string;
-      cuisine: string;
-      nutrition: {
-        calories: number;
-        protein: number;
-        fat: number;
-        carbohydrates: number;
-      };
-    }>;
-    // 总营养数据（所有菜品汇总，方便前端直接使用）
-    nutrition: {
-      calories: number;
-      protein: number;
-      fat: number;
-      carbohydrates: number;
-    };
-    // 其他元数据
-    plating?: string;
-    description?: string;
-    ingredients?: string[];
-    historicalOrigins?: string;
-    poeticDescription?: string;
-    foodNamePoetic?: string;
-    foodPrice?: number;
-    dishSuggestion?: string;
-  }> {
-    let lastError: any;
-
-    for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
-      try {
-        const model = this.genAI.getGenerativeModel({
-          model: env.GEMINI_MODEL,
-        });
-
-        const diningTimeScenery = this.getDiningTimeScenery();
-
-      // 构建提示词
-      const prompt = `你是一位专业的美食分析师。请仔细分析这张食物图片，并严格按照以下 JSON 格式返回分析结果。
+  private buildPrompt(diningTimeScenery: string): string {
+    return `你是一位专业的美食分析师。请仔细分析这张食物图片，并严格按照以下 JSON 格式返回分析结果。
 
 ## 输出要求
 1. 必须是纯 JSON 格式，不要使用 markdown 代码块（不要用 \`\`\`json 包裹）
@@ -246,139 +444,5 @@ export class AiService implements OnModuleInit {
 }
 
 现在请分析这张图片，返回纯 JSON 格式：`;
-
-      // 调用 Gemini API 进行图像分析
-      const result = await model.generateContent([
-        prompt,
-        {
-          inlineData: {
-            data: imageBase64,
-            mimeType: 'image/jpeg',
-          },
-        },
-      ]);
-
-      const response = await result.response;
-      const text = response.text();
-
-      // 提取 JSON（去除可能的 markdown 标记）
-      const jsonMatch = text.match(/\{[\s\S]*\}/);
-      if (!jsonMatch) {
-        throw new Error('Invalid response format from AI');
-      }
-
-      const analysis = JSON.parse(jsonMatch[0]);
-
-      // 统一规范化为 dishes 数组结构
-      let normalizedDishes: Array<{
-        foodName: string;
-        cuisine: string;
-        nutrition: {
-          calories: number;
-          protein: number;
-          fat: number;
-          carbohydrates: number;
-        };
-      }> = [];
-
-      // 如果 AI 返回了 dishes 数组，使用它；否则将单菜品包装成数组
-      if (analysis.dishes && Array.isArray(analysis.dishes) && analysis.dishes.length > 0) {
-        normalizedDishes = analysis.dishes.map((dish: any) => ({
-          foodName: dish.foodName || '未知菜品',
-          cuisine: dish.cuisine || '其他',
-          nutrition: this._validateAndNormalizeNutrition(dish.nutrition),
-        }));
-      } else if (analysis.foodName) {
-        // 单菜品模式：包装成数组
-        normalizedDishes = [{
-          foodName: analysis.foodName,
-          cuisine: analysis.cuisine || '其他',
-          nutrition: this._validateAndNormalizeNutrition(analysis.nutrition),
-        }];
-      } else {
-        throw new Error('Invalid AI response: neither dishes nor foodName found');
-      }
-
-      // 验证食材列表
-      const ingredients = analysis.ingredients || [];
-      if (!Array.isArray(ingredients) || ingredients.length < 2) {
-        this.logger.warn(`Ingredients list is incomplete: ${JSON.stringify(ingredients)}`);
-      }
-
-      // 计算总营养（所有菜品的总和）
-      const totalNutrition = normalizedDishes.reduce(
-        (acc, dish) => ({
-          calories: acc.calories + dish.nutrition.calories,
-          protein: acc.protein + dish.nutrition.protein,
-          fat: acc.fat + dish.nutrition.fat,
-          carbohydrates: acc.carbohydrates + dish.nutrition.carbohydrates,
-        }),
-        { calories: 0, protein: 0, fat: 0, carbohydrates: 0 }
-      );
-
-      // 生成诗意化的食物名称（使用主菜品）
-      const foodNamePoetic = `${this.getTimePrefix()}${normalizedDishes[0].foodName}${this.getPoeticSuffix()}`;
-
-      this.logger.log(`Successfully analyzed ${normalizedDishes.length} dish(es)`);
-
-      return {
-        // 统一的 API 契约：始终返回 dishes 数组
-        dishes: normalizedDishes,
-        // 总营养数据（所有菜品汇总）
-        nutrition: {
-          calories: totalNutrition.calories,
-          protein: totalNutrition.protein,
-          fat: totalNutrition.fat,
-          carbohydrates: totalNutrition.carbohydrates,
-        },
-        // 其他元数据
-        plating: analysis.plating,
-        description: analysis.description,
-        ingredients: ingredients,
-        historicalOrigins: analysis.historicalOrigins,
-        poeticDescription: analysis.poeticDescription,
-        foodNamePoetic,
-        foodPrice: analysis.foodPrice ? Number(analysis.foodPrice) : undefined,
-        dishSuggestion: analysis.dishSuggestion,
-      };
-      // 成功则直接返回，不进行重试
-      } catch (error) {
-        lastError = error;
-
-        // JSON 解析错误不重试
-        if (error instanceof SyntaxError) {
-          this.logger.error('Failed to parse AI response as JSON', error.stack);
-          throw new Error('AI returned invalid JSON format');
-        }
-
-        // 检查是否为可重试的错误
-        if (this.isRetriableError(error) && attempt < MAX_RETRIES - 1) {
-          const delayMs = BASE_DELAY_MS * Math.pow(2, attempt);
-          this.logger.warn(
-            `AI analysis attempt ${attempt + 1} failed (${error.status || error.code || 'unknown'}): ${error.message}. ` +
-            `Retrying in ${delayMs}ms...`
-          );
-          await this.delay(delayMs);
-          continue;
-        }
-
-        // 不可重试的错误或已达到最大重试次数
-        break;
-      }
-    }
-
-    // 所有重试都失败
-    this.logger.error(
-      `Failed to analyze food image after ${MAX_RETRIES} attempts: ${lastError.message}`,
-      lastError.stack
-    );
-    throw lastError;
-  }
-
-  /**
-   * 将图片文件转换为 base64
-   */
-  imageToBase64(buffer: Buffer): string {
-    return buffer.toString('base64');
   }
 }
