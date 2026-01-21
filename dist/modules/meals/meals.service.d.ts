@@ -7,6 +7,7 @@ import { DishesService } from '../dishes/dishes.service';
 export declare class MealsService {
     private prisma;
     private dishesService;
+    private readonly logger;
     constructor(prisma: PrismaService, dishesService: DishesService);
     create(userId: string, dto: CreateMealDto): Promise<MealResponseDto>;
     createPending(userId: string, dto: {
@@ -53,5 +54,11 @@ export declare class MealsService {
     private updateCuisineUnlock;
     private updateDailyNutrition;
     private updateDishUnlock;
+    private extractFirstDish;
+    private toPrismaJson;
+    private buildSearchText;
+    private getStartOfDay;
+    private buildWhereClause;
+    private buildOrderByClause;
     private mapToMealResponse;
 }

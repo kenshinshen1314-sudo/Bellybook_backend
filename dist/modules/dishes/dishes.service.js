@@ -19,7 +19,8 @@ let DishesService = DishesService_1 = class DishesService {
     constructor(prisma) {
         this.prisma = prisma;
     }
-    async findOrCreateAndUpdate(foodName, cuisine, price, calories, protein, fat, carbohydrates, description, historicalOrigins) {
+    async findOrCreateAndUpdate(input) {
+        const { foodName, cuisine, price, nutrition, description, historicalOrigins } = input;
         let dish = await this.prisma.dish.findUnique({
             where: { name: foodName },
         });
@@ -32,10 +33,10 @@ let DishesService = DishesService_1 = class DishesService {
                 data: {
                     appearanceCount: newCount,
                     averagePrice: this.updateWeightedAverage(dish.averagePrice, price, oldWeight, newWeight),
-                    averageCalories: this.updateWeightedAverage(dish.averageCalories, calories, oldWeight, newWeight),
-                    averageProtein: this.updateWeightedAverage(dish.averageProtein, protein, oldWeight, newWeight),
-                    averageFat: this.updateWeightedAverage(dish.averageFat, fat, oldWeight, newWeight),
-                    averageCarbs: this.updateWeightedAverage(dish.averageCarbs, carbohydrates, oldWeight, newWeight),
+                    averageCalories: this.updateWeightedAverage(dish.averageCalories, nutrition.calories, oldWeight, newWeight),
+                    averageProtein: this.updateWeightedAverage(dish.averageProtein, nutrition.protein, oldWeight, newWeight),
+                    averageFat: this.updateWeightedAverage(dish.averageFat, nutrition.fat, oldWeight, newWeight),
+                    averageCarbs: this.updateWeightedAverage(dish.averageCarbs, nutrition.carbohydrates, oldWeight, newWeight),
                     description: description || dish.description,
                     historicalOrigins: historicalOrigins || dish.historicalOrigins,
                 },
@@ -51,10 +52,10 @@ let DishesService = DishesService_1 = class DishesService {
                     historicalOrigins,
                     appearanceCount: 1,
                     averagePrice: price,
-                    averageCalories: calories,
-                    averageProtein: protein,
-                    averageFat: fat,
-                    averageCarbs: carbohydrates,
+                    averageCalories: nutrition.calories,
+                    averageProtein: nutrition.protein,
+                    averageFat: nutrition.fat,
+                    averageCarbs: nutrition.carbohydrates,
                 },
             });
             this.logger.log(`Created new dish: ${foodName} (${cuisine})`);

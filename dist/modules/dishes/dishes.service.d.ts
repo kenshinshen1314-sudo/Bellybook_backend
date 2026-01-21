@@ -1,9 +1,10 @@
 import { PrismaService } from '../../database/prisma.service';
+import { DishInput } from '../ai/ai-types';
 export declare class DishesService {
     private prisma;
     private readonly logger;
     constructor(prisma: PrismaService);
-    findOrCreateAndUpdate(foodName: string, cuisine: string, price?: number, calories?: number, protein?: number, fat?: number, carbohydrates?: number, description?: string, historicalOrigins?: string): Promise<{
+    findOrCreateAndUpdate(input: DishInput): Promise<{
         id: number;
         createdAt: Date;
         updatedAt: Date;
