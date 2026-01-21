@@ -19,9 +19,15 @@ describe('UsersService', () => {
       count: jest.fn(),
       findMany: jest.fn(),
     },
-    cuisineUnlock: {
+    cuisine_unlocks: {
       count: jest.fn(),
       findMany: jest.fn(),
+    },
+    user_profiles: {
+      upsert: jest.fn(),
+    },
+    user_settings: {
+      upsert: jest.fn(),
     },
   };
 
@@ -49,7 +55,7 @@ describe('UsersService', () => {
         id: userId,
         username: 'testuser',
         displayName: 'Test User',
-        profile: {
+        user_profiles: {
           displayName: 'Test User',
           bio: null,
           avatarUrl: null,
@@ -83,7 +89,7 @@ describe('UsersService', () => {
       const user = {
         id: userId,
         username: 'testuser',
-        profile: {
+        user_profiles: {
           displayName: 'Updated Name',
         },
       };
@@ -105,7 +111,7 @@ describe('UsersService', () => {
 
       const user = {
         id: userId,
-        settings: {
+        user_settings: {
           theme: 'DARK',
         },
       };
@@ -126,12 +132,13 @@ describe('UsersService', () => {
       mockPrismaService.user.findUnique.mockResolvedValue(user);
 
       mockPrismaService.meal.count.mockResolvedValueOnce(10); // totalMeals
-      mockPrismaService.cuisineUnlock.count.mockResolvedValueOnce(5); // totalCuisines
-      mockPrismaService.cuisineUnlock.findMany.mockResolvedValue([
+      mockPrismaService.cuisine_unlocks.count.mockResolvedValueOnce(5); // totalCuisines
+      mockPrismaService.cuisine_unlocks.findMany.mockResolvedValue([
         { cuisineName: 'Chinese', mealCount: 5 },
         { cuisineName: 'Japanese', mealCount: 3 },
       ]);
-      mockPrismaService.meal.count.mockResolvedValueOnce(7); // thisWeekMeals
+      mockPrismaService.meal.findMany.mockResolvedValue([]); // thisWeekMeals for streak
+      mockPrismaService.meal.count.mockResolvedValueOnce(7); // thisWeekMeals count
       mockPrismaService.meal.count.mockResolvedValueOnce(20); // thisMonthMeals
 
       const result = await service.getStats(userId);
@@ -165,12 +172,12 @@ describe('UsersService', () => {
         return { createdAt: date };
       });
 
-      mockPrismaService.meal.count.mockResolvedValue(5);
-      mockPrismaService.cuisineUnlock.count.mockResolvedValue(3);
-      mockPrismaService.cuisineUnlock.findMany.mockResolvedValue([]);
-      mockPrismaService.meal.findMany.mockResolvedValue(meals);
-      mockPrismaService.meal.count.mockResolvedValue(5);
-      mockPrismaService.meal.count.mockResolvedValue(5);
+      mockPrismaService.meal.count.mockResolvedValueOnce(5); // totalMeals
+      mockPrismaService.cuisine_unlocks.count.mockResolvedValueOnce(3); // totalCuisines
+      mockPrismaService.cuisine_unlocks.findMany.mockResolvedValue([]);
+      mockPrismaService.meal.findMany.mockResolvedValueOnce(meals); // thisWeekMeals for streak
+      mockPrismaService.meal.count.mockResolvedValueOnce(5); // thisWeekMeals count
+      mockPrismaService.meal.count.mockResolvedValueOnce(5); // thisMonthMeals
 
       const result = await service.getStats(userId);
 

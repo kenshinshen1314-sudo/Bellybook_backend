@@ -14,22 +14,22 @@ describe('SyncService', () => {
       create: jest.fn(),
       update: jest.fn(),
     },
-    userProfile: {
+    user_profiles: {
       findUnique: jest.fn(),
       upsert: jest.fn(),
     },
-    userSettings: {
+    user_settings: {
       findUnique: jest.fn(),
       upsert: jest.fn(),
     },
-    cuisineUnlock: {
+    cuisine_unlocks: {
       findMany: jest.fn(),
     },
-    syncQueue: {
+    sync_queues: {
       count: jest.fn(),
       deleteMany: jest.fn(),
     },
-    syncLog: {
+    sync_logs: {
       findFirst: jest.fn(),
     },
   };
@@ -68,9 +68,9 @@ describe('SyncService', () => {
       ];
 
       mockPrismaService.meal.findMany.mockResolvedValue(meals);
-      mockPrismaService.userProfile.findUnique.mockResolvedValue(profile);
-      mockPrismaService.userSettings.findUnique.mockResolvedValue(settings);
-      mockPrismaService.cuisineUnlock.findMany.mockResolvedValue(cuisineUnlocks);
+      mockPrismaService.user_profiles.findUnique.mockResolvedValue(profile);
+      mockPrismaService.user_settings.findUnique.mockResolvedValue(settings);
+      mockPrismaService.cuisine_unlocks.findMany.mockResolvedValue(cuisineUnlocks);
 
       const result = await service.pull(userId, lastSyncAt);
 
@@ -86,9 +86,9 @@ describe('SyncService', () => {
       const userId = 'userId123';
 
       mockPrismaService.meal.findMany.mockResolvedValue([]);
-      mockPrismaService.userProfile.findUnique.mockResolvedValue(null);
-      mockPrismaService.userSettings.findUnique.mockResolvedValue(null);
-      mockPrismaService.cuisineUnlock.findMany.mockResolvedValue([]);
+      mockPrismaService.user_profiles.findUnique.mockResolvedValue(null);
+      mockPrismaService.user_settings.findUnique.mockResolvedValue(null);
+      mockPrismaService.cuisine_unlocks.findMany.mockResolvedValue([]);
 
       const result = await service.pull(userId);
 
@@ -109,9 +109,9 @@ describe('SyncService', () => {
       }));
 
       mockPrismaService.meal.findMany.mockResolvedValue(meals);
-      mockPrismaService.userProfile.findUnique.mockResolvedValue(null);
-      mockPrismaService.userSettings.findUnique.mockResolvedValue(null);
-      mockPrismaService.cuisineUnlock.findMany.mockResolvedValue([]);
+      mockPrismaService.user_profiles.findUnique.mockResolvedValue(null);
+      mockPrismaService.user_settings.findUnique.mockResolvedValue(null);
+      mockPrismaService.cuisine_unlocks.findMany.mockResolvedValue([]);
 
       const result = await service.pull(userId);
 
@@ -132,15 +132,23 @@ describe('SyncService', () => {
               foodName: 'Test Food',
               cuisine: 'Chinese',
               analysis: {
-                foodName: 'Test Food',
-                cuisine: 'Chinese',
+                dishes: [{
+                  foodName: 'Test Food',
+                  cuisine: 'Chinese',
+                  nutrition: {
+                    calories: 500,
+                    protein: 20,
+                    fat: 15,
+                    carbohydrates: 60,
+                  },
+                }],
                 nutrition: {
                   calories: 500,
                   protein: 20,
                   fat: 15,
                   carbohydrates: 60,
                 },
-                analyzedAt: new Date().toISOString(),
+                foodPrice: 50,
               },
             },
             clientId: 'client1',
@@ -157,7 +165,7 @@ describe('SyncService', () => {
       };
 
       mockPrismaService.meal.create.mockResolvedValue({});
-      mockPrismaService.userProfile.upsert.mockResolvedValue({});
+      mockPrismaService.user_profiles.upsert.mockResolvedValue({});
 
       const result = await service.push(userId, dto);
 
@@ -300,8 +308,8 @@ describe('SyncService', () => {
     it('should return sync status', async () => {
       const userId = 'userId123';
 
-      mockPrismaService.syncQueue.count.mockResolvedValue(5);
-      mockPrismaService.syncLog.findFirst.mockResolvedValue({
+      mockPrismaService.sync_queues.count.mockResolvedValue(5);
+      mockPrismaService.sync_logs.findFirst.mockResolvedValue({
         createdAt: new Date('2024-01-01T00:00:00Z'),
       });
 
@@ -316,8 +324,8 @@ describe('SyncService', () => {
     it('should mark as unhealthy when pending items > 100', async () => {
       const userId = 'userId123';
 
-      mockPrismaService.syncQueue.count.mockResolvedValue(150);
-      mockPrismaService.syncLog.findFirst.mockResolvedValue(null);
+      mockPrismaService.sync_queues.count.mockResolvedValue(150);
+      mockPrismaService.sync_logs.findFirst.mockResolvedValue(null);
 
       const result = await service.getStatus(userId);
 
@@ -329,11 +337,11 @@ describe('SyncService', () => {
     it('should clear sync queue', async () => {
       const userId = 'userId123';
 
-      mockPrismaService.syncQueue.deleteMany.mockResolvedValue({ count: 10 });
+      mockPrismaService.sync_queues.deleteMany.mockResolvedValue({ count: 10 });
 
       await service.clearQueue(userId);
 
-      expect(mockPrismaService.syncQueue.deleteMany).toHaveBeenCalledWith({
+      expect(mockPrismaService.sync_queues.deleteMany).toHaveBeenCalledWith({
         where: { userId },
       });
     });

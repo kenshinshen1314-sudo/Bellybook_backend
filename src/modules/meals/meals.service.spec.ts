@@ -2,6 +2,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { NotFoundException, ForbiddenException } from '@nestjs/common';
 import { MealsService } from './meals.service';
 import { PrismaService } from '../../database/prisma.service';
+import { DishesService } from '../dishes/dishes.service';
 import { CreateMealDto } from './dto/create-meal.dto';
 import { UpdateMealDto } from './dto/update-meal.dto';
 
@@ -17,19 +18,33 @@ describe('MealsService', () => {
       update: jest.fn(),
       count: jest.fn(),
     },
-    cuisineUnlock: {
+    cuisine_unlocks: {
       findUnique: jest.fn(),
       update: jest.fn(),
       create: jest.fn(),
     },
-    cuisineConfig: {
+    cuisine_configs: {
       findUnique: jest.fn(),
     },
-    dailyNutrition: {
+    daily_nutritions: {
       findUnique: jest.fn(),
       update: jest.fn(),
       create: jest.fn(),
     },
+    dish_unlocks: {
+      findUnique: jest.fn(),
+      create: jest.fn(),
+      update: jest.fn(),
+    },
+    dish: {
+      findUnique: jest.fn(),
+      create: jest.fn(),
+      update: jest.fn(),
+    },
+  };
+
+  const mockDishesService = {
+    findOrCreateAndUpdate: jest.fn(),
   };
 
   beforeEach(async () => {
@@ -39,6 +54,10 @@ describe('MealsService', () => {
         {
           provide: PrismaService,
           useValue: mockPrismaService,
+        },
+        {
+          provide: DishesService,
+          useValue: mockDishesService,
         },
       ],
     }).compile();
@@ -55,15 +74,23 @@ describe('MealsService', () => {
       const dto: CreateMealDto = {
         imageUrl: 'https://example.com/image.jpg',
         analysis: {
-          foodName: 'Test Food',
-          cuisine: 'Chinese',
+          dishes: [{
+            foodName: 'Test Food',
+            cuisine: 'Chinese',
+            nutrition: {
+              calories: 500,
+              protein: 20,
+              fat: 15,
+              carbohydrates: 60,
+            },
+          }],
           nutrition: {
             calories: 500,
             protein: 20,
             fat: 15,
             carbohydrates: 60,
           },
-          analyzedAt: new Date().toISOString(),
+          foodPrice: 50,
         },
       };
 
@@ -71,30 +98,38 @@ describe('MealsService', () => {
         id: 'meal123',
         userId,
         imageUrl: dto.imageUrl,
-        foodName: dto.analysis.foodName,
-        cuisine: dto.analysis.cuisine,
+        thumbnailUrl: null,
+        analysis: dto.analysis,
+        foodName: 'Test Food',
+        cuisine: 'Chinese',
         calories: dto.analysis.nutrition.calories,
         protein: dto.analysis.nutrition.protein,
         fat: dto.analysis.nutrition.fat,
         carbohydrates: dto.analysis.nutrition.carbohydrates,
+        price: 50,
+        mealType: 'SNACK' as const,
+        notes: null,
+        isSynced: false,
+        version: 1,
         createdAt: new Date(),
         updatedAt: new Date(),
       };
 
+      mockDishesService.findOrCreateAndUpdate.mockResolvedValue({ id: 1, name: 'Test Food' });
       mockPrismaService.meal.create.mockResolvedValue(meal);
-      mockPrismaService.cuisineUnlock.findUnique.mockResolvedValue(null);
-      mockPrismaService.cuisineConfig.findUnique.mockResolvedValue({
+      mockPrismaService.cuisine_unlocks.findUnique.mockResolvedValue(null);
+      mockPrismaService.cuisine_configs.findUnique.mockResolvedValue({
         icon: '🍜',
         color: '#FF0000',
       });
-      mockPrismaService.cuisineUnlock.create.mockResolvedValue({});
-      mockPrismaService.dailyNutrition.findUnique.mockResolvedValue(null);
-      mockPrismaService.dailyNutrition.create.mockResolvedValue({});
+      mockPrismaService.cuisine_unlocks.create.mockResolvedValue({});
+      mockPrismaService.daily_nutritions.findUnique.mockResolvedValue(null);
+      mockPrismaService.daily_nutritions.create.mockResolvedValue({});
 
       const result = await service.create(userId, dto);
 
       expect(result.id).toBe('meal123');
-      expect(result.foodName).toBe('Test Food');
+      expect(result.analysis).toBeDefined();
       expect(mockPrismaService.meal.create).toHaveBeenCalled();
     });
 
@@ -103,30 +138,39 @@ describe('MealsService', () => {
       const dto: CreateMealDto = {
         imageUrl: 'https://example.com/image.jpg',
         analysis: {
-          foodName: 'Test Food',
-          cuisine: 'Chinese',
+          dishes: [{
+            foodName: 'Test Food',
+            cuisine: 'Chinese',
+            nutrition: {
+              calories: 500,
+              protein: 20,
+              fat: 15,
+              carbohydrates: 60,
+            },
+          }],
           nutrition: {
             calories: 500,
             protein: 20,
             fat: 15,
             carbohydrates: 60,
           },
-          analyzedAt: new Date().toISOString(),
+          foodPrice: 50,
         },
       };
 
       const meal = { id: 'meal123', userId };
+      mockDishesService.findOrCreateAndUpdate.mockResolvedValue({ id: 1, name: 'Test Food' });
       mockPrismaService.meal.create.mockResolvedValue(meal);
 
       const existingUnlock = { id: 1, mealCount: 3 };
-      mockPrismaService.cuisineUnlock.findUnique.mockResolvedValue(existingUnlock);
-      mockPrismaService.cuisineUnlock.update.mockResolvedValue({});
-      mockPrismaService.dailyNutrition.findUnique.mockResolvedValue(null);
-      mockPrismaService.dailyNutrition.create.mockResolvedValue({});
+      mockPrismaService.cuisine_unlocks.findUnique.mockResolvedValue(existingUnlock);
+      mockPrismaService.cuisine_unlocks.update.mockResolvedValue({});
+      mockPrismaService.daily_nutritions.findUnique.mockResolvedValue(null);
+      mockPrismaService.daily_nutritions.create.mockResolvedValue({});
 
       await service.create(userId, dto);
 
-      expect(mockPrismaService.cuisineUnlock.update).toHaveBeenCalled();
+      expect(mockPrismaService.cuisine_unlocks.update).toHaveBeenCalled();
     });
   });
 
