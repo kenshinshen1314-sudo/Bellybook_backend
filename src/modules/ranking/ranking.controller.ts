@@ -1,5 +1,5 @@
 import { Controller, Get, Query, UseGuards } from '@nestjs/common';
-import { RankingService } from './ranking.service';
+import { RankingOptimizedService } from './ranking-optimized.service';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { CuisineMastersQueryDto, LeaderboardQueryDto, RankingPeriod } from './dto/ranking-query.dto';
 import { CuisineMastersDto, LeaderboardDto, RankingStatsDto, GourmetsDto, DishExpertsDto, CuisineExpertDetailDto, AllUsersDishesDto, UserUnlockedDishesDto } from './dto/ranking-response.dto';
@@ -7,7 +7,7 @@ import { CuisineMastersDto, LeaderboardDto, RankingStatsDto, GourmetsDto, DishEx
 @Controller('ranking')
 @UseGuards(JwtAuthGuard)
 export class RankingController {
-  constructor(private readonly rankingService: RankingService) {}
+  constructor(private readonly rankingService: RankingOptimizedService) {}
 
   /**
    * 获取菜系专家榜

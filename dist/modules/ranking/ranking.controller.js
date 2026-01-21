@@ -14,7 +14,7 @@ var __param = (this && this.__param) || function (paramIndex, decorator) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.RankingController = void 0;
 const common_1 = require("@nestjs/common");
-const ranking_service_1 = require("./ranking.service");
+const ranking_optimized_service_1 = require("./ranking-optimized.service");
 const jwt_auth_guard_1 = require("../../common/guards/jwt-auth.guard");
 const ranking_query_dto_1 = require("./dto/ranking-query.dto");
 let RankingController = class RankingController {
@@ -111,6 +111,6 @@ __decorate([
 exports.RankingController = RankingController = __decorate([
     (0, common_1.Controller)('ranking'),
     (0, common_1.UseGuards)(jwt_auth_guard_1.JwtAuthGuard),
-    __metadata("design:paramtypes", [ranking_service_1.RankingService])
+    __metadata("design:paramtypes", [ranking_optimized_service_1.RankingOptimizedService])
 ], RankingController);
 //# sourceMappingURL=ranking.controller.js.map
