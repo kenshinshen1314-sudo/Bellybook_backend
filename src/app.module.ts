@@ -13,6 +13,7 @@ import { NutritionModule } from './modules/nutrition/nutrition.module';
 import { SyncModule } from './modules/sync/sync.module';
 import { StorageModule } from './modules/storage/storage.module';
 import { RankingModule } from './modules/ranking/ranking.module';
+import { CacheModuleClass } from './modules/cache/cache.module';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
 import { env } from './config/env';
 
@@ -25,6 +26,7 @@ import { env } from './config/env';
       ttl: env.RATE_LIMIT_TTL * 1000,
       limit: env.RATE_LIMIT_MAX,
     }]),
+    CacheModuleClass, // Global cache module (Redis)
     DatabaseModule,
     AuthModule,
     UsersModule,

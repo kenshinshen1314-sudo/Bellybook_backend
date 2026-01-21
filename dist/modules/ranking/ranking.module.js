@@ -12,6 +12,7 @@ const ranking_controller_1 = require("./ranking.controller");
 const ranking_optimized_service_1 = require("./ranking-optimized.service");
 const database_module_1 = require("../../database/database.module");
 const auth_module_1 = require("../auth/auth.module");
+const cache_module_1 = require("../cache/cache.module");
 const cuisine_masters_query_1 = require("./queries/cuisine-masters.query");
 const leaderboard_query_1 = require("./queries/leaderboard.query");
 const gourmets_query_1 = require("./queries/gourmets.query");
@@ -24,7 +25,7 @@ let RankingModule = class RankingModule {
 exports.RankingModule = RankingModule;
 exports.RankingModule = RankingModule = __decorate([
     (0, common_1.Module)({
-        imports: [database_module_1.DatabaseModule, auth_module_1.AuthModule],
+        imports: [database_module_1.DatabaseModule, auth_module_1.AuthModule, cache_module_1.CacheModuleClass],
         controllers: [ranking_controller_1.RankingController],
         providers: [
             ranking_optimized_service_1.RankingOptimizedService,

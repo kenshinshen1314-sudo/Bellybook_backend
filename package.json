@@ -21,6 +21,7 @@
   },
   "dependencies": {
     "@google/generative-ai": "^0.24.1",
+    "@nestjs/cache-manager": "^3.1.0",
     "@nestjs/common": "^11.0.1",
     "@nestjs/config": "^4.0.2",
     "@nestjs/core": "^11.0.1",
@@ -30,7 +31,10 @@
     "@nestjs/throttler": "^6.5.0",
     "@prisma/client": "^6.0.0",
     "@supabase/supabase-js": "^2.90.1",
+    "@types/cache-manager": "^4.0.6",
     "bcrypt": "^6.0.0",
+    "cache-manager": "^7.2.8",
+    "cache-manager-redis-store": "^3.0.1",
     "class-transformer": "^0.5.1",
     "class-validator": "^0.14.3",
     "https-proxy-agent": "^7.0.6",

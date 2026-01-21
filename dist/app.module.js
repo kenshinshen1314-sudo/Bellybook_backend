@@ -22,6 +22,7 @@ const nutrition_module_1 = require("./modules/nutrition/nutrition.module");
 const sync_module_1 = require("./modules/sync/sync.module");
 const storage_module_1 = require("./modules/storage/storage.module");
 const ranking_module_1 = require("./modules/ranking/ranking.module");
+const cache_module_1 = require("./modules/cache/cache.module");
 const jwt_auth_guard_1 = require("./common/guards/jwt-auth.guard");
 const env_1 = require("./config/env");
 let AppModule = class AppModule {
@@ -37,6 +38,7 @@ exports.AppModule = AppModule = __decorate([
                     ttl: env_1.env.RATE_LIMIT_TTL * 1000,
                     limit: env_1.env.RATE_LIMIT_MAX,
                 }]),
+            cache_module_1.CacheModuleClass,
             database_module_1.DatabaseModule,
             auth_module_1.AuthModule,
             users_module_1.UsersModule,

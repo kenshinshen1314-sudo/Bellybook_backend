@@ -3,6 +3,7 @@ import { RankingController } from './ranking.controller';
 import { RankingOptimizedService } from './ranking-optimized.service';
 import { DatabaseModule } from '../../database/database.module';
 import { AuthModule } from '../auth/auth.module';
+import { CacheModuleClass } from '../cache/cache.module';
 
 // Query Services
 import { CuisineMastersQuery } from './queries/cuisine-masters.query';
@@ -16,7 +17,7 @@ import { StatsQuery } from './queries/stats.query';
 import { RankingCacheService } from './cache/ranking-cache.service';
 
 @Module({
-  imports: [DatabaseModule, AuthModule],
+  imports: [DatabaseModule, AuthModule, CacheModuleClass],
   controllers: [RankingController],
   providers: [
     // Main Service

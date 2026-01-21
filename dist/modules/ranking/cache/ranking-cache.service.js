@@ -10,78 +10,62 @@ var __metadata = (this && this.__metadata) || function (k, v) {
 };
 var RankingCacheService_1;
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.RankingCacheService = void 0;
+exports.RankingCacheService = exports.RankingCacheTTL = void 0;
 const common_1 = require("@nestjs/common");
-const prisma_service_1 = require("../../../database/prisma.service");
-const client_1 = require("@prisma/client");
-const CACHE_TTL_MINUTES = 5;
+const cache_service_1 = require("../../cache/cache.service");
+exports.RankingCacheTTL = {
+    STATS: cache_service_1.CacheTTL.MEDIUM,
+    LEADERBOARD: cache_service_1.CacheTTL.MEDIUM,
+    CUISINE_MASTERS: cache_service_1.CacheTTL.MEDIUM,
+    GOURMETS: cache_service_1.CacheTTL.MEDIUM,
+    DISH_EXPERTS: cache_service_1.CacheTTL.MEDIUM,
+    USER_DETAILS: cache_service_1.CacheTTL.SHORT,
+};
 let RankingCacheService = RankingCacheService_1 = class RankingCacheService {
-    prisma;
+    cacheService;
     logger = new common_1.Logger(RankingCacheService_1.name);
-    constructor(prisma) {
-        this.prisma = prisma;
+    constructor(cacheService) {
+        this.cacheService = cacheService;
     }
     async get(key) {
-        const cache = await this.prisma.ranking_caches.findUnique({
-            where: { id: key },
-        });
-        if (!cache)
-            return null;
-        if (cache.expiresAt < new Date()) {
-            await this.delete(key);
-            return null;
-        }
-        this.logger.debug(`Cache hit: ${key}`);
-        return cache.rankings;
+        const value = await this.cacheService.getWithPrefix(cache_service_1.CachePrefix.RANKING, key);
+        return value ?? null;
     }
-    async set(key, data, ttlMinutes = CACHE_TTL_MINUTES) {
-        const expiresAt = new Date();
-        expiresAt.setMinutes(expiresAt.getMinutes() + ttlMinutes);
-        await this.prisma.ranking_caches.upsert({
-            where: { id: key },
-            create: {
-                id: key,
-                period: client_1.RankingPeriod.ALL_TIME,
-                rankings: data,
-                expiresAt,
-            },
-            update: {
-                rankings: data,
-                expiresAt,
-                updatedAt: new Date(),
-            },
-        });
-        this.logger.debug(`Cache set: ${key}, TTL: ${ttlMinutes}min`);
+    async set(key, data, ttl = exports.RankingCacheTTL.LEADERBOARD) {
+        await this.cacheService.setWithPrefix(cache_service_1.CachePrefix.RANKING, key, data, ttl);
     }
     async delete(key) {
-        try {
-            await this.prisma.ranking_caches.delete({ where: { id: key } });
-            this.logger.debug(`Cache deleted: ${key}`);
-        }
-        catch (error) {
-            this.logger.debug(`Cache delete skipped (not found): ${key}`);
-        }
+        await this.cacheService.delWithPrefix(cache_service_1.CachePrefix.RANKING, key);
     }
     async clearExpired() {
-        const result = await this.prisma.ranking_caches.deleteMany({
-            where: {
-                expiresAt: {
-                    lt: new Date(),
-                },
-            },
-        });
-        if (result.count > 0) {
-            this.logger.log(`Cleared ${result.count} expired cache entries`);
-        }
+        this.logger.debug('Redis automatically handles expired cache cleanup');
     }
     async clearAll() {
-        const result = await this.prisma.ranking_caches.deleteMany({});
-        this.logger.log(`Cleared all cache entries: ${result.count}`);
+        await this.cacheService.reset();
+        this.logger.log('Cleared all ranking cache');
+    }
+    async clearPeriod(period) {
+        await this.cacheService.delPattern(`${cache_service_1.CachePrefix.RANKING}:*:${period}`);
+        this.logger.log(`Cleared ranking cache for period: ${period}`);
+    }
+    async warmup(keysAndValues) {
+        await this.cacheService.setMany(keysAndValues.map(({ key, value, ttl }) => ({
+            key: `${cache_service_1.CachePrefix.RANKING}:${key}`,
+            value,
+            ttl: ttl ?? exports.RankingCacheTTL.LEADERBOARD,
+        })));
+        this.logger.log(`Cache warmup completed: ${keysAndValues.length} entries`);
+    }
+    async getStats() {
+        return {
+            prefix: cache_service_1.CachePrefix.RANKING,
+            note: 'Redis cache stats require direct Redis client connection',
+        };
     }
 };
 exports.RankingCacheService = RankingCacheService;
 exports.RankingCacheService = RankingCacheService = RankingCacheService_1 = __decorate([
     (0, common_1.Injectable)(),
-    __metadata("design:paramtypes", [prisma_service_1.PrismaService])
+    __metadata("design:paramtypes", [cache_service_1.CacheService])
 ], RankingCacheService);
 //# sourceMappingURL=ranking-cache.service.js.map
