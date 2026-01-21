@@ -172,9 +172,10 @@ export class AuthService {
     };
 
     const expiresIn = this.parseExpiration(env.JWT_EXPIRES_IN);
-    const accessToken = await this.jwtService.signAsync(payload as any, {
-      expiresIn: env.JWT_EXPIRES_IN as any,
-    });
+    const accessToken = await this.jwtService.signAsync(
+      payload as any,
+      { expiresIn: env.JWT_EXPIRES_IN as any }
+    );
 
     const refreshToken = CryptoUtil.generateRandomToken();
 

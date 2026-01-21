@@ -106,7 +106,7 @@ export class MealsService {
         }),
         foodName: '分析中...',
         cuisine: '待定',
-        mealType: (dto.mealType as any) || 'SNACK',
+        mealType: (dto.mealType || 'SNACK') as any,
         searchText: 'analyzing pending',
       },
     });
@@ -405,7 +405,9 @@ export class MealsService {
   private async updateDailyNutrition(userId: string, meal: Meal): Promise<void> {
     const mealDate = this.getStartOfDay(meal.createdAt);
 
-    const nutrition = (meal.analysis as any)?.nutrition || {};
+    // 从 JSON 提取营养数据
+    const analysis = meal.analysis as unknown as { nutrition?: Record<string, number | undefined> };
+    const nutrition = analysis?.nutrition || {};
 
     const existing = await this.prisma.daily_nutritions.findUnique({
       where: { userId_date: { userId, date: mealDate } },
@@ -525,7 +527,7 @@ export class MealsService {
     };
 
     if (filters.mealType) {
-      where.mealType = filters.mealType as any;
+      where.mealType = filters.mealType as 'BREAKFAST' | 'LUNCH' | 'DINNER' | 'SNACK';
     }
 
     if (filters.startDate || filters.endDate) {

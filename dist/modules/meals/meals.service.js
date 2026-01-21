@@ -77,7 +77,7 @@ let MealsService = MealsService_1 = class MealsService {
                 }),
                 foodName: '分析中...',
                 cuisine: '待定',
-                mealType: dto.mealType || 'SNACK',
+                mealType: (dto.mealType || 'SNACK'),
                 searchText: 'analyzing pending',
             },
         });
@@ -269,7 +269,8 @@ let MealsService = MealsService_1 = class MealsService {
     }
     async updateDailyNutrition(userId, meal) {
         const mealDate = this.getStartOfDay(meal.createdAt);
-        const nutrition = meal.analysis?.nutrition || {};
+        const analysis = meal.analysis;
+        const nutrition = analysis?.nutrition || {};
         const existing = await this.prisma.daily_nutritions.findUnique({
             where: { userId_date: { userId, date: mealDate } },
         });

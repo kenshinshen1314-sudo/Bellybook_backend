@@ -138,9 +138,7 @@ let AuthService = class AuthService {
             subscriptionTier: user.subscriptionTier,
         };
         const expiresIn = this.parseExpiration(env_1.env.JWT_EXPIRES_IN);
-        const accessToken = await this.jwtService.signAsync(payload, {
-            expiresIn: env_1.env.JWT_EXPIRES_IN,
-        });
+        const accessToken = await this.jwtService.signAsync(payload, { expiresIn: env_1.env.JWT_EXPIRES_IN });
         const refreshToken = crypto_util_1.CryptoUtil.generateRandomToken();
         return {
             accessToken,
