@@ -11,6 +11,7 @@ var __metadata = (this && this.__metadata) || function (k, v) {
 var __param = (this && this.__param) || function (paramIndex, decorator) {
     return function (target, key) { decorator(target, key, paramIndex); }
 };
+var StorageController_1;
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.StorageController = void 0;
 const common_1 = require("@nestjs/common");
@@ -22,11 +23,12 @@ const users_service_1 = require("../users/users.service");
 const jwt_auth_guard_1 = require("../../common/guards/jwt-auth.guard");
 const current_user_decorator_1 = require("../../common/decorators/current-user.decorator");
 const response_dto_1 = require("../../common/dto/response.dto");
-let StorageController = class StorageController {
+let StorageController = StorageController_1 = class StorageController {
     storageService;
     aiService;
     mealsService;
     usersService;
+    logger = new common_1.Logger(StorageController_1.name);
     constructor(storageService, aiService, mealsService, usersService) {
         this.storageService = storageService;
         this.aiService = aiService;
@@ -38,10 +40,11 @@ let StorageController = class StorageController {
     }
     async uploadWithAnalysis(userId, file) {
         try {
-            console.log('[StorageController] uploadWithAnalysis called, userId:', userId);
+            this.logger.log(`uploadWithAnalysis called, userId: ${userId}`);
             const quota = await this.usersService.checkAnalysisQuota(userId);
-            console.log('[StorageController] quota check result:', quota);
+            this.logger.debug(`quota check result: ${JSON.stringify(quota)}`);
             if (!quota.allowed) {
+                this.logger.warn(`quota exceeded for user ${userId}, limit: ${quota.limit}`);
                 throw new common_1.HttpException({
                     statusCode: common_1.HttpStatus.TOO_MANY_REQUESTS,
                     message: `Daily AI analysis quota exceeded. Limit: ${quota.limit}, please try again tomorrow.`,
@@ -52,23 +55,23 @@ let StorageController = class StorageController {
                     },
                 }, common_1.HttpStatus.TOO_MANY_REQUESTS);
             }
-            console.log('[StorageController] uploading image...');
+            this.logger.debug('uploading image...');
             const uploadResult = await this.storageService.uploadImage(userId, file);
-            console.log('[StorageController] upload result:', uploadResult);
+            this.logger.debug(`upload result: ${JSON.stringify(uploadResult)}`);
             const imageBase64 = this.storageService.fileToBase64(file);
-            console.log('[StorageController] image converted to base64, length:', imageBase64?.length);
-            console.log('[StorageController] starting AI analysis...');
+            this.logger.debug(`image converted to base64, length: ${imageBase64?.length}`);
+            this.logger.debug('starting AI analysis...');
             const analysis = await this.aiService.analyzeFoodImage(imageBase64);
-            console.log('[StorageController] AI analysis completed:', analysis?.dishes?.[0]?.foodName);
+            this.logger.debug(`AI analysis completed: ${analysis?.dishes?.[0]?.foodName}`);
             await this.usersService.incrementAnalysisCount(userId);
-            console.log('[StorageController] creating meal record...');
+            this.logger.debug('creating meal record...');
             const meal = await this.mealsService.create(userId, {
                 imageUrl: uploadResult.url,
                 thumbnailUrl: uploadResult.thumbnailUrl,
-                analysis: analysis,
+                analysis,
                 mealType: 'SNACK',
             });
-            console.log('[StorageController] meal created:', meal?.id);
+            this.logger.debug(`meal created: ${meal?.id}`);
             return {
                 upload: uploadResult,
                 analysis,
@@ -80,34 +83,7 @@ let StorageController = class StorageController {
             };
         }
         catch (error) {
-            console.error('[StorageController] uploadWithAnalysis error:', error);
-            console.error('[StorageController] error stack:', error?.stack);
-            throw error;
-        }
-    }
-    async processAiAnalysis(userId, mealId, imageBase64, uploadResult) {
-        try {
-            const analysis = await this.aiService.analyzeFoodImage(imageBase64);
-            await this.usersService.incrementAnalysisCount(userId);
-            await this.mealsService.updateWithAnalysis(mealId, {
-                analysis: analysis,
-                calories: analysis.nutrition.calories,
-                protein: analysis.nutrition.protein,
-                fat: analysis.nutrition.fat,
-                carbohydrates: analysis.nutrition.carbohydrates,
-                price: analysis.foodPrice,
-                foodName: analysis.dishes[0]?.foodName,
-                cuisine: analysis.dishes[0]?.cuisine,
-                description: analysis.description,
-                historicalOrigins: analysis.historicalOrigins,
-            });
-            console.log(`AI analysis completed for meal ${mealId}`);
-        }
-        catch (error) {
-            await this.mealsService.markAnalysisFailed(mealId, {
-                error: error.message,
-                status: 'failed',
-            });
+            this.logger.error('uploadWithAnalysis error:', error);
             throw error;
         }
     }
@@ -153,7 +129,7 @@ __decorate([
     __metadata("design:paramtypes", [String, String]),
     __metadata("design:returntype", Promise)
 ], StorageController.prototype, "getPresignedUrl", null);
-exports.StorageController = StorageController = __decorate([
+exports.StorageController = StorageController = StorageController_1 = __decorate([
     (0, common_1.Controller)('storage'),
     (0, common_1.UseGuards)(jwt_auth_guard_1.JwtAuthGuard),
     __metadata("design:paramtypes", [storage_service_1.StorageService,

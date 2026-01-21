@@ -1,4 +1,21 @@
-import { Controller, Post, Delete, Body, UseGuards, UseInterceptors, UploadedFile, HttpException, HttpStatus } from '@nestjs/common';
+/**
+ * [INPUT]: 依赖 StorageService 的文件存储、AiService 的 AI 分析、MealsService 的餐食管理、UsersService 的用户配额
+ * [OUTPUT]: 对外提供文件上传、带 AI 分析的上传、文件删除、预签名 URL
+ * [POS]: storage 模块的控制器层，处理 HTTP 请求
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
+import {
+  Controller,
+  Post,
+  Delete,
+  Body,
+  UseGuards,
+  UseInterceptors,
+  UploadedFile,
+  HttpException,
+  HttpStatus,
+  Logger,
+} from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { StorageService } from './storage.service';
 import { AiService } from '../ai/ai.service';
@@ -11,6 +28,8 @@ import { SuccessResponse } from '../../common/dto/response.dto';
 @Controller('storage')
 @UseGuards(JwtAuthGuard)
 export class StorageController {
+  private readonly logger = new Logger(StorageController.name);
+
   constructor(
     private readonly storageService: StorageService,
     private readonly aiService: AiService,
@@ -18,12 +37,15 @@ export class StorageController {
     private readonly usersService: UsersService,
   ) {}
 
+  /**
+   * 上传图片
+   */
   @Post('upload')
   @UseInterceptors(FileInterceptor('file'))
   async uploadImage(
     @CurrentUser('userId') userId: string,
     @UploadedFile() file: Express.Multer.File,
-  ): Promise<any> {
+  ) {
     return this.storageService.uploadImage(userId, file);
   }
 
@@ -38,13 +60,14 @@ export class StorageController {
     @UploadedFile() file: Express.Multer.File,
   ) {
     try {
-      console.log('[StorageController] uploadWithAnalysis called, userId:', userId);
+      this.logger.log(`uploadWithAnalysis called, userId: ${userId}`);
 
       // 0. 检查配额
       const quota = await this.usersService.checkAnalysisQuota(userId);
-      console.log('[StorageController] quota check result:', quota);
+      this.logger.debug(`quota check result: ${JSON.stringify(quota)}`);
 
       if (!quota.allowed) {
+        this.logger.warn(`quota exceeded for user ${userId}, limit: ${quota.limit}`);
         throw new HttpException(
           {
             statusCode: HttpStatus.TOO_MANY_REQUESTS,
@@ -60,31 +83,31 @@ export class StorageController {
       }
 
       // 1. 上传图片
-      console.log('[StorageController] uploading image...');
+      this.logger.debug('uploading image...');
       const uploadResult = await this.storageService.uploadImage(userId, file);
-      console.log('[StorageController] upload result:', uploadResult);
+      this.logger.debug(`upload result: ${JSON.stringify(uploadResult)}`);
 
       // 2. 转换图片为 base64 用于 AI 分析
       const imageBase64 = this.storageService.fileToBase64(file);
-      console.log('[StorageController] image converted to base64, length:', imageBase64?.length);
+      this.logger.debug(`image converted to base64, length: ${imageBase64?.length}`);
 
       // 3. 同步执行 AI 分析（等待结果）
-      console.log('[StorageController] starting AI analysis...');
+      this.logger.debug('starting AI analysis...');
       const analysis = await this.aiService.analyzeFoodImage(imageBase64);
-      console.log('[StorageController] AI analysis completed:', analysis?.dishes?.[0]?.foodName);
+      this.logger.debug(`AI analysis completed: ${analysis?.dishes?.[0]?.foodName}`);
 
       // 4. 增加配额使用计数
       await this.usersService.incrementAnalysisCount(userId);
 
       // 5. 创建完整的 meal 记录
-      console.log('[StorageController] creating meal record...');
+      this.logger.debug('creating meal record...');
       const meal = await this.mealsService.create(userId, {
         imageUrl: uploadResult.url,
         thumbnailUrl: uploadResult.thumbnailUrl,
-        analysis: analysis as any,
+        analysis,
         mealType: 'SNACK',
       });
-      console.log('[StorageController] meal created:', meal?.id);
+      this.logger.debug(`meal created: ${meal?.id}`);
 
       // 6. 返回完整结果
       return {
@@ -97,61 +120,25 @@ export class StorageController {
         },
       };
     } catch (error) {
-      console.error('[StorageController] uploadWithAnalysis error:', error);
-      console.error('[StorageController] error stack:', error?.stack);
+      this.logger.error('uploadWithAnalysis error:', error);
       throw error;
     }
   }
 
   /**
-   * 后台异步处理 AI 分析（已弃用，保留供其他功能使用）
+   * 删除文件
    */
-  private async processAiAnalysis(
-    userId: string,
-    mealId: string,
-    imageBase64: string,
-    uploadResult: any,
-  ): Promise<void> {
-    try {
-      // 执行 AI 分析
-      const analysis = await this.aiService.analyzeFoodImage(imageBase64);
-
-      // 增加配额使用计数
-      await this.usersService.incrementAnalysisCount(userId);
-
-      // 更新 meal 记录
-      await this.mealsService.updateWithAnalysis(mealId, {
-        analysis: analysis as any,
-        calories: analysis.nutrition.calories,
-        protein: analysis.nutrition.protein,
-        fat: analysis.nutrition.fat,
-        carbohydrates: analysis.nutrition.carbohydrates,
-        price: analysis.foodPrice,
-        foodName: analysis.dishes[0]?.foodName,
-        cuisine: analysis.dishes[0]?.cuisine,
-        description: analysis.description,
-        historicalOrigins: analysis.historicalOrigins,
-      });
-
-      console.log(`AI analysis completed for meal ${mealId}`);
-    } catch (error) {
-      // 分析失败，更新 meal 记录为失败状态
-      await this.mealsService.markAnalysisFailed(mealId, {
-        error: error.message,
-        status: 'failed',
-      });
-      throw error;
-    }
-  }
-
   @Delete('delete')
   async deleteFile(@Body('key') key: string): Promise<SuccessResponse> {
     await this.storageService.deleteFile(key);
     return new SuccessResponse(null, 'File deleted successfully');
   }
 
+  /**
+   * 获取预签名 URL
+   */
   @Post('presigned-url')
-  async getPresignedUrl(@Body('filename') filename: string, @Body('type') type: string): Promise<any> {
+  async getPresignedUrl(@Body('filename') filename: string, @Body('type') type: string) {
     return this.storageService.getPresignedUrl(filename, type);
   }
 }

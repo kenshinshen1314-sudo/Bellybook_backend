@@ -8,8 +8,14 @@ export declare class StorageController {
     private readonly aiService;
     private readonly mealsService;
     private readonly usersService;
+    private readonly logger;
     constructor(storageService: StorageService, aiService: AiService, mealsService: MealsService, usersService: UsersService);
-    uploadImage(userId: string, file: Express.Multer.File): Promise<any>;
+    uploadImage(userId: string, file: Express.Multer.File): Promise<{
+        url: string;
+        thumbnailUrl: string;
+        key: string;
+        size: number;
+    }>;
     uploadWithAnalysis(userId: string, file: Express.Multer.File): Promise<{
         upload: {
             url: string;
@@ -49,7 +55,9 @@ export declare class StorageController {
             remaining: number;
         };
     }>;
-    private processAiAnalysis;
     deleteFile(key: string): Promise<SuccessResponse>;
-    getPresignedUrl(filename: string, type: string): Promise<any>;
+    getPresignedUrl(filename: string, type: string): Promise<{
+        url: string;
+        key: string;
+    }>;
 }
