@@ -1,12 +1,62 @@
-import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+/**
+ * [INPUT]: 依赖 PrismaService 的数据库访问能力
+ * [OUTPUT]: 对外提供用户资料、设置、统计、配额管理
+ * [POS]: users 模块的核心服务层，被 users.controller、storage.controller 消费
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
+import { Injectable, NotFoundException, BadRequestException, Logger } from '@nestjs/common';
 import { PrismaService } from '../../database/prisma.service';
+import { User } from '@prisma/client';
 import { UpdateProfileDto } from './dto/update-profile.dto';
 import { UpdateSettingsDto } from './dto/update-settings.dto';
 import { ProfileResponseDto, SettingsResponseDto, UserStatsDto } from './dto/user-response.dto';
 
+/**
+ * 用户 upsert 创建数据（用于 updateProfile）
+ */
+interface UserUpsertCreate {
+  id: string;
+  username: string;
+  passwordHash: string;
+  breakfastReminderTime: string;
+  lunchReminderTime: string;
+  dinnerReminderTime: string;
+  user_settings?: {
+    create?: Record<string, never>;
+  };
+  user_profiles?: {
+    create: {
+      displayName: string;
+      bio?: string | null;
+      avatarUrl?: string | null;
+    };
+  };
+}
+
+/**
+ * 用户设置 upsert 创建数据（用于 updateSettings）
+ */
+interface UserSettingsUpsertCreate {
+  id: string;
+  username: string;
+  passwordHash: string;
+  breakfastReminderTime: string;
+  lunchReminderTime: string;
+  dinnerReminderTime: string;
+  user_settings?: {
+    create: UpdateSettingsDto;
+  };
+}
+
 @Injectable()
 export class UsersService {
-  constructor(private prisma: PrismaService) { }
+  private readonly logger = new Logger(UsersService.name);
+
+  constructor(private prisma: PrismaService) {}
+
+  // ============================================================
+  // Public Methods
+  // ============================================================
 
   /**
    * 检查用户今日 AI 分析配额
@@ -71,6 +121,9 @@ export class UsersService {
     });
   }
 
+  /**
+   * 获取用户资料
+   */
   async getProfile(userId: string): Promise<ProfileResponseDto> {
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
@@ -84,27 +137,13 @@ export class UsersService {
     return this.mapToProfileResponse(user);
   }
 
+  /**
+   * 更新用户资料
+   */
   async updateProfile(userId: string, dto: UpdateProfileDto): Promise<ProfileResponseDto> {
     const user = await this.prisma.user.upsert({
       where: { id: userId },
-      create: {
-        id: userId,
-        username: '',
-        passwordHash: '',
-        breakfastReminderTime: '08:00',
-        lunchReminderTime: '12:00',
-        dinnerReminderTime: '18:00',
-        user_settings: {
-          create: {},
-        },
-        user_profiles: {
-          create: {
-            displayName: dto.displayName || '',
-            bio: dto.bio,
-            avatarUrl: dto.avatarUrl,
-          },
-        },
-      } as any,
+      create: this.buildUserUpsertCreate(userId, dto) as unknown as UserUpsertCreate,
       update: {
         user_profiles: {
           upsert: {
@@ -123,6 +162,9 @@ export class UsersService {
     return this.mapToProfileResponse(user);
   }
 
+  /**
+   * 获取用户设置
+   */
   async getSettings(userId: string): Promise<SettingsResponseDto> {
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
@@ -136,7 +178,22 @@ export class UsersService {
     return this.mapToSettingsResponse(user);
   }
 
+  /**
+   * 更新用户设置
+   */
   async updateSettings(userId: string, dto: UpdateSettingsDto): Promise<SettingsResponseDto> {
+    const createData: UserSettingsUpsertCreate = {
+      id: userId,
+      username: '',
+      passwordHash: '',
+      breakfastReminderTime: '08:00',
+      lunchReminderTime: '12:00',
+      dinnerReminderTime: '18:00',
+      user_settings: {
+        create: dto,
+      },
+    };
+
     const user = await this.prisma.user.upsert({
       where: { id: userId },
       update: {
@@ -147,23 +204,16 @@ export class UsersService {
           },
         },
       },
-      create: {
-        id: userId,
-        username: '',
-        passwordHash: '',
-        breakfastReminderTime: '08:00',
-        lunchReminderTime: '12:00',
-        dinnerReminderTime: '18:00',
-        user_settings: {
-          create: dto,
-        },
-      },
+      create: createData,
       include: { user_settings: true },
-    } as any);
+    });
 
     return this.mapToSettingsResponse(user);
   }
 
+  /**
+   * 获取用户统计数据
+   */
   async getStats(userId: string): Promise<UserStatsDto> {
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
@@ -183,9 +233,7 @@ export class UsersService {
       }),
     ]);
 
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-
+    const today = this.getStartOfDay();
     const weekAgo = new Date(today);
     weekAgo.setDate(weekAgo.getDate() - 7);
 
@@ -209,8 +257,10 @@ export class UsersService {
       }),
     ]);
 
-    const currentStreak = await this.calculateStreak(userId);
-    const longestStreak = await this.calculateLongestStreak(userId);
+    const [currentStreak, longestStreak] = await Promise.all([
+      this.calculateStreak(userId),
+      this.calculateLongestStreak(userId),
+    ]);
 
     return {
       totalMeals,
@@ -226,6 +276,9 @@ export class UsersService {
     };
   }
 
+  /**
+   * 删除用户账户（软删除）
+   */
   async deleteAccount(userId: string): Promise<void> {
     await this.prisma.user.update({
       where: { id: userId },
@@ -234,8 +287,54 @@ export class UsersService {
         email: null,
       },
     });
+
+    this.logger.log(`User account deleted: ${userId}`);
   }
 
+  // ============================================================
+  // Private Methods - Helpers
+  // ============================================================
+
+  /**
+   * 构建用户 upsert 创建数据
+   */
+  private buildUserUpsertCreate(userId: string, dto: UpdateProfileDto): Record<string, unknown> {
+    return {
+      id: userId,
+      username: '',
+      passwordHash: '',
+      breakfastReminderTime: '08:00',
+      lunchReminderTime: '12:00',
+      dinnerReminderTime: '18:00',
+      user_settings: {
+        create: {},
+      },
+      user_profiles: {
+        create: {
+          displayName: dto.displayName || '',
+          bio: dto.bio,
+          avatarUrl: dto.avatarUrl,
+        },
+      },
+    };
+  }
+
+  /**
+   * 获取一天的开始时间（00:00:00）
+   */
+  private getStartOfDay(): Date {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    return today;
+  }
+
+  // ============================================================
+  // Private Methods - Streak Calculations
+  // ============================================================
+
+  /**
+   * 计算当前连续打卡天数
+   */
   private async calculateStreak(userId: string): Promise<number> {
     const meals = await this.prisma.meal.findMany({
       where: { userId, deletedAt: null },
@@ -267,6 +366,9 @@ export class UsersService {
     return streak;
   }
 
+  /**
+   * 计算最长连续打卡天数
+   */
   private async calculateLongestStreak(userId: string): Promise<number> {
     const meals = await this.prisma.meal.findMany({
       where: { userId, deletedAt: null },
@@ -278,14 +380,14 @@ export class UsersService {
 
     const uniqueDays = [
       ...new Set(meals.map(m => new Date(m.createdAt).toDateString()))
-    ].sort() as string[];
+    ].sort();
 
     let longestStreak = 1;
     let currentStreak = 1;
 
     for (let i = 1; i < uniqueDays.length; i++) {
-      const prev = new Date(uniqueDays[i - 1] as string);
-      const curr = new Date(uniqueDays[i] as string);
+      const prev = new Date(uniqueDays[i - 1]);
+      const curr = new Date(uniqueDays[i]);
       const diffDays = Math.floor((curr.getTime() - prev.getTime()) / (1000 * 60 * 60 * 24));
 
       if (diffDays === 1) {
@@ -299,6 +401,13 @@ export class UsersService {
     return longestStreak;
   }
 
+  // ============================================================
+  // Private Methods - Mappers
+  // ============================================================
+
+  /**
+   * 映射用户实体到资料响应
+   */
   private mapToProfileResponse(user: any): ProfileResponseDto {
     return {
       id: user.id,
@@ -310,6 +419,9 @@ export class UsersService {
     };
   }
 
+  /**
+   * 映射用户实体到设置响应
+   */
   private mapToSettingsResponse(user: any): SettingsResponseDto {
     const settings = user.user_settings || {};
     return {

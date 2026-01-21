@@ -8,12 +8,14 @@ var __decorate = (this && this.__decorate) || function (decorators, target, key,
 var __metadata = (this && this.__metadata) || function (k, v) {
     if (typeof Reflect === "object" && typeof Reflect.metadata === "function") return Reflect.metadata(k, v);
 };
+var UsersService_1;
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.UsersService = void 0;
 const common_1 = require("@nestjs/common");
 const prisma_service_1 = require("../../database/prisma.service");
-let UsersService = class UsersService {
+let UsersService = UsersService_1 = class UsersService {
     prisma;
+    logger = new common_1.Logger(UsersService_1.name);
     constructor(prisma) {
         this.prisma = prisma;
     }
@@ -75,24 +77,7 @@ let UsersService = class UsersService {
     async updateProfile(userId, dto) {
         const user = await this.prisma.user.upsert({
             where: { id: userId },
-            create: {
-                id: userId,
-                username: '',
-                passwordHash: '',
-                breakfastReminderTime: '08:00',
-                lunchReminderTime: '12:00',
-                dinnerReminderTime: '18:00',
-                user_settings: {
-                    create: {},
-                },
-                user_profiles: {
-                    create: {
-                        displayName: dto.displayName || '',
-                        bio: dto.bio,
-                        avatarUrl: dto.avatarUrl,
-                    },
-                },
-            },
+            create: this.buildUserUpsertCreate(userId, dto),
             update: {
                 user_profiles: {
                     upsert: {
@@ -120,6 +105,17 @@ let UsersService = class UsersService {
         return this.mapToSettingsResponse(user);
     }
     async updateSettings(userId, dto) {
+        const createData = {
+            id: userId,
+            username: '',
+            passwordHash: '',
+            breakfastReminderTime: '08:00',
+            lunchReminderTime: '12:00',
+            dinnerReminderTime: '18:00',
+            user_settings: {
+                create: dto,
+            },
+        };
         const user = await this.prisma.user.upsert({
             where: { id: userId },
             update: {
@@ -130,17 +126,7 @@ let UsersService = class UsersService {
                     },
                 },
             },
-            create: {
-                id: userId,
-                username: '',
-                passwordHash: '',
-                breakfastReminderTime: '08:00',
-                lunchReminderTime: '12:00',
-                dinnerReminderTime: '18:00',
-                user_settings: {
-                    create: dto,
-                },
-            },
+            create: createData,
             include: { user_settings: true },
         });
         return this.mapToSettingsResponse(user);
@@ -161,8 +147,7 @@ let UsersService = class UsersService {
                 take: 5,
             }),
         ]);
-        const today = new Date();
-        today.setHours(0, 0, 0, 0);
+        const today = this.getStartOfDay();
         const weekAgo = new Date(today);
         weekAgo.setDate(weekAgo.getDate() - 7);
         const monthAgo = new Date(today);
@@ -183,8 +168,10 @@ let UsersService = class UsersService {
                 },
             }),
         ]);
-        const currentStreak = await this.calculateStreak(userId);
-        const longestStreak = await this.calculateLongestStreak(userId);
+        const [currentStreak, longestStreak] = await Promise.all([
+            this.calculateStreak(userId),
+            this.calculateLongestStreak(userId),
+        ]);
         return {
             totalMeals,
             totalCuisines,
@@ -206,6 +193,32 @@ let UsersService = class UsersService {
                 email: null,
             },
         });
+        this.logger.log(`User account deleted: ${userId}`);
+    }
+    buildUserUpsertCreate(userId, dto) {
+        return {
+            id: userId,
+            username: '',
+            passwordHash: '',
+            breakfastReminderTime: '08:00',
+            lunchReminderTime: '12:00',
+            dinnerReminderTime: '18:00',
+            user_settings: {
+                create: {},
+            },
+            user_profiles: {
+                create: {
+                    displayName: dto.displayName || '',
+                    bio: dto.bio,
+                    avatarUrl: dto.avatarUrl,
+                },
+            },
+        };
+    }
+    getStartOfDay() {
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        return today;
     }
     async calculateStreak(userId) {
         const meals = await this.prisma.meal.findMany({
@@ -283,7 +296,7 @@ let UsersService = class UsersService {
     }
 };
 exports.UsersService = UsersService;
-exports.UsersService = UsersService = __decorate([
+exports.UsersService = UsersService = UsersService_1 = __decorate([
     (0, common_1.Injectable)(),
     __metadata("design:paramtypes", [prisma_service_1.PrismaService])
 ], UsersService);

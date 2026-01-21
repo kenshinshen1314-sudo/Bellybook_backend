@@ -1,3 +1,9 @@
+/**
+ * [INPUT]: 依赖 Supabase Storage 的文件存储能力
+ * [OUTPUT]: 对外提供文件上传、删除、预签名 URL、base64 转换
+ * [POS]: storage 模块的核心服务层，被 storage.controller、meals.service 消费
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 import { Injectable, BadRequestException, Logger, OnModuleInit } from '@nestjs/common';
 import { createClient } from '@supabase/supabase-js';
 import { env } from '../../config/env';
@@ -102,11 +108,12 @@ export class StorageService implements OnModuleInit {
         size: file.size,
       };
     } catch (error) {
+      // 保留原始错误信息，重新抛出
       if (error instanceof BadRequestException) {
         throw error;
       }
       this.logger.error('Upload error:', error);
-      throw new BadRequestException('Failed to upload file to storage');
+      throw error; // 直接抛出原始错误，保留堆栈信息
     }
   }
 
@@ -124,11 +131,12 @@ export class StorageService implements OnModuleInit {
 
       this.logger.log(`File deleted successfully: ${key}`);
     } catch (error) {
+      // 保留原始错误信息，重新抛出
       if (error instanceof BadRequestException) {
         throw error;
       }
       this.logger.error('Delete error:', error);
-      throw new BadRequestException('Failed to delete file from storage');
+      throw error; // 直接抛出原始错误，保留堆栈信息
     }
   }
 

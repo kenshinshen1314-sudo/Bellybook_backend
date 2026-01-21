@@ -88,7 +88,7 @@ let StorageService = StorageService_1 = class StorageService {
                 throw error;
             }
             this.logger.error('Upload error:', error);
-            throw new common_1.BadRequestException('Failed to upload file to storage');
+            throw error;
         }
     }
     async deleteFile(key) {
@@ -108,7 +108,7 @@ let StorageService = StorageService_1 = class StorageService {
                 throw error;
             }
             this.logger.error('Delete error:', error);
-            throw new common_1.BadRequestException('Failed to delete file from storage');
+            throw error;
         }
     }
     getPresignedUrl(filename, type) {
