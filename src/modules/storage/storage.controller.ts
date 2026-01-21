@@ -71,7 +71,7 @@ export class StorageController {
       // 3. 同步执行 AI 分析（等待结果）
       console.log('[StorageController] starting AI analysis...');
       const analysis = await this.aiService.analyzeFoodImage(imageBase64);
-      console.log('[StorageController] AI analysis completed:', analysis?.foodName);
+      console.log('[StorageController] AI analysis completed:', analysis?.dishes?.[0]?.foodName);
 
       // 4. 增加配额使用计数
       await this.usersService.incrementAnalysisCount(userId);
@@ -127,8 +127,8 @@ export class StorageController {
         fat: analysis.nutrition.fat,
         carbohydrates: analysis.nutrition.carbohydrates,
         price: analysis.foodPrice,
-        foodName: analysis.foodName,
-        cuisine: analysis.cuisine,
+        foodName: analysis.dishes[0]?.foodName,
+        cuisine: analysis.dishes[0]?.cuisine,
         description: analysis.description,
         historicalOrigins: analysis.historicalOrigins,
       });

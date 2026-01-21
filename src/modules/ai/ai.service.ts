@@ -84,6 +84,44 @@ export class AiService implements OnModuleInit {
   }
 
   /**
+   * 验证并规范化营养数据
+   * 清洗 AI 返回的原始数据，确保在合理范围内
+   */
+  private _validateAndNormalizeNutrition(nutrition: any): {
+    calories: number;
+    protein: number;
+    fat: number;
+    carbohydrates: number;
+  } {
+    const calories = Number(nutrition?.calories) || 0;
+    const protein = Number(nutrition?.protein) || 0;
+    const fat = Number(nutrition?.fat) || 0;
+    const carbohydrates = Number(nutrition?.carbohydrates) || 0;
+
+    // 验证并修正异常值
+    if (calories < 0 || calories > 5000) {
+      this.logger.warn(`Unusual calories detected: ${calories}, using fallback`);
+      return { calories: 300, protein: 15, fat: 20, carbohydrates: 40 };
+    }
+    if (protein < 0 || protein > 200) {
+      this.logger.warn(`Unusual protein detected: ${protein}, normalizing`);
+    }
+    if (fat < 0 || fat > 200) {
+      this.logger.warn(`Unusual fat detected: ${fat}, normalizing`);
+    }
+    if (carbohydrates < 0 || carbohydrates > 500) {
+      this.logger.warn(`Unusual carbohydrates detected: ${carbohydrates}, normalizing`);
+    }
+
+    return {
+      calories: Math.max(0, Math.min(5000, calories)),
+      protein: Math.max(0, Math.min(200, protein)),
+      fat: Math.max(0, Math.min(200, fat)),
+      carbohydrates: Math.max(0, Math.min(500, carbohydrates)),
+    };
+  }
+
+  /**
    * 延迟函数，用于重试间隔
    */
   private delay(ms: number): Promise<void> {
@@ -111,22 +149,13 @@ export class AiService implements OnModuleInit {
 
   /**
    * 分析食物图像并返回营养信息
+   * 统一 API 契约：始终返回 dishes 数组（单菜品也是数组长度为 1）
    */
   async analyzeFoodImage(imageBase64: string): Promise<{
-    foodName: string;
-    cuisine: string;
-    nutrition: {
-      calories: number;
-      protein: number;
-      fat: number;
-      carbohydrates: number;
-      fiber?: number;
-      sugar?: number;
-      sodium?: number;
-    };
-    dishes?: Array<{
+    // 核心：菜品数组（统一数据结构）
+    dishes: Array<{
       foodName: string;
-      cuisine?: string;
+      cuisine: string;
       nutrition: {
         calories: number;
         protein: number;
@@ -134,6 +163,14 @@ export class AiService implements OnModuleInit {
         carbohydrates: number;
       };
     }>;
+    // 总营养数据（所有菜品汇总，方便前端直接使用）
+    nutrition: {
+      calories: number;
+      protein: number;
+      fat: number;
+      carbohydrates: number;
+    };
+    // 其他元数据
     plating?: string;
     description?: string;
     ingredients?: string[];
@@ -232,70 +269,72 @@ export class AiService implements OnModuleInit {
 
       const analysis = JSON.parse(jsonMatch[0]);
 
-      // 验证必需字段
-      if (!analysis.foodName || !analysis.cuisine || !analysis.nutrition) {
-        throw new Error('Missing required fields in AI response');
+      // 统一规范化为 dishes 数组结构
+      let normalizedDishes: Array<{
+        foodName: string;
+        cuisine: string;
+        nutrition: {
+          calories: number;
+          protein: number;
+          fat: number;
+          carbohydrates: number;
+        };
+      }> = [];
+
+      // 如果 AI 返回了 dishes 数组，使用它；否则将单菜品包装成数组
+      if (analysis.dishes && Array.isArray(analysis.dishes) && analysis.dishes.length > 0) {
+        normalizedDishes = analysis.dishes.map((dish: any) => ({
+          foodName: dish.foodName || '未知菜品',
+          cuisine: dish.cuisine || '其他',
+          nutrition: this._validateAndNormalizeNutrition(dish.nutrition),
+        }));
+      } else if (analysis.foodName) {
+        // 单菜品模式：包装成数组
+        normalizedDishes = [{
+          foodName: analysis.foodName,
+          cuisine: analysis.cuisine || '其他',
+          nutrition: this._validateAndNormalizeNutrition(analysis.nutrition),
+        }];
+      } else {
+        throw new Error('Invalid AI response: neither dishes nor foodName found');
       }
 
       // 验证食材列表
-      if (!analysis.ingredients || !Array.isArray(analysis.ingredients) || analysis.ingredients.length < 2) {
-        this.logger.warn(`Ingredients list is incomplete: ${JSON.stringify(analysis.ingredients)}`);
+      const ingredients = analysis.ingredients || [];
+      if (!Array.isArray(ingredients) || ingredients.length < 2) {
+        this.logger.warn(`Ingredients list is incomplete: ${JSON.stringify(ingredients)}`);
       }
 
-      // 验证营养数据合理性
-      const { calories, protein, fat, carbohydrates, sodium } = analysis.nutrition;
+      // 计算总营养（所有菜品的总和）
+      const totalNutrition = normalizedDishes.reduce(
+        (acc, dish) => ({
+          calories: acc.calories + dish.nutrition.calories,
+          protein: acc.protein + dish.nutrition.protein,
+          fat: acc.fat + dish.nutrition.fat,
+          carbohydrates: acc.carbohydrates + dish.nutrition.carbohydrates,
+        }),
+        { calories: 0, protein: 0, fat: 0, carbohydrates: 0 }
+      );
 
-      if (typeof calories !== 'number' || calories < 0 || calories > 5000) {
-        this.logger.warn(`Unusual calories detected: ${calories}, using fallback`);
-        analysis.nutrition.calories = Math.max(0, Math.min(5000, Number(calories) || 300));
-      }
-      if (typeof protein !== 'number' || protein < 0 || protein > 200) {
-        this.logger.warn(`Unusual protein detected: ${protein}, using fallback`);
-        analysis.nutrition.protein = Math.max(0, Math.min(200, Number(protein) || 15));
-      }
-      if (typeof fat !== 'number' || fat < 0 || fat > 200) {
-        this.logger.warn(`Unusual fat detected: ${fat}, using fallback`);
-        analysis.nutrition.fat = Math.max(0, Math.min(200, Number(fat) || 20));
-      }
-      if (typeof carbohydrates !== 'number' || carbohydrates < 0 || carbohydrates > 500) {
-        this.logger.warn(`Unusual carbohydrates detected: ${carbohydrates}, using fallback`);
-        analysis.nutrition.carbohydrates = Math.max(0, Math.min(500, Number(carbohydrates) || 40));
-      }
-      if (sodium !== undefined && (typeof sodium !== 'number' || sodium < 0 || sodium > 10000)) {
-        this.logger.warn(`Unusual sodium detected: ${sodium}, using fallback`);
-        analysis.nutrition.sodium = Math.max(0, Math.min(10000, Number(sodium) || 1000));
-      }
+      // 生成诗意化的食物名称（使用主菜品）
+      const foodNamePoetic = `${this.getTimePrefix()}${normalizedDishes[0].foodName}${this.getPoeticSuffix()}`;
 
-      // 生成诗意化的食物名称
-      const foodNamePoetic = `${this.getTimePrefix()}${analysis.foodName}${this.getPoeticSuffix()}`;
-
-      this.logger.log(`Successfully analyzed food: ${analysis.foodName}`);
+      this.logger.log(`Successfully analyzed ${normalizedDishes.length} dish(es)`);
 
       return {
-        foodName: analysis.foodName,
-        cuisine: analysis.cuisine,
+        // 统一的 API 契约：始终返回 dishes 数组
+        dishes: normalizedDishes,
+        // 总营养数据（所有菜品汇总）
         nutrition: {
-          calories: Number(analysis.nutrition.calories) || 0,
-          protein: Number(analysis.nutrition.protein) || 0,
-          fat: Number(analysis.nutrition.fat) || 0,
-          carbohydrates: Number(analysis.nutrition.carbohydrates) || 0,
-          fiber: analysis.nutrition.fiber ? Number(analysis.nutrition.fiber) : undefined,
-          sugar: analysis.nutrition.sugar ? Number(analysis.nutrition.sugar) : undefined,
-          sodium: analysis.nutrition.sodium ? Number(analysis.nutrition.sodium) : undefined,
+          calories: totalNutrition.calories,
+          protein: totalNutrition.protein,
+          fat: totalNutrition.fat,
+          carbohydrates: totalNutrition.carbohydrates,
         },
-        dishes: analysis.dishes?.map((dish: any) => ({
-          foodName: dish.foodName,
-          cuisine: dish.cuisine,
-          nutrition: {
-            calories: Number(dish.nutrition?.calories) || 0,
-            protein: Number(dish.nutrition?.protein) || 0,
-            fat: Number(dish.nutrition?.fat) || 0,
-            carbohydrates: Number(dish.nutrition?.carbohydrates) || 0,
-          },
-        })) || [],
+        // 其他元数据
         plating: analysis.plating,
         description: analysis.description,
-        ingredients: analysis.ingredients,
+        ingredients: ingredients,
         historicalOrigins: analysis.historicalOrigins,
         poeticDescription: analysis.poeticDescription,
         foodNamePoetic,

@@ -18,8 +18,14 @@ export class MealsService {
   ) {}
 
   async create(userId: string, dto: CreateMealDto): Promise<MealResponseDto> {
-    const foodName = dto.analysis.foodName;
-    const cuisine = dto.analysis.cuisine;
+    // AI 返回的是 dishes 数组，取第一个菜品
+    const firstDish = dto.analysis.dishes?.[0];
+    if (!firstDish) {
+      throw new Error('Invalid AI response: no dishes found');
+    }
+
+    const foodName = firstDish.foodName;
+    const cuisine = firstDish.cuisine;
     const calories = dto.analysis.nutrition.calories;
     const protein = dto.analysis.nutrition.protein;
     const fat = dto.analysis.nutrition.fat;
