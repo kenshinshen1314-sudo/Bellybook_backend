@@ -9,8 +9,8 @@ export declare class DishesService {
         createdAt: Date;
         updatedAt: Date;
         name: string;
-        cuisine: string;
         description: string | null;
+        cuisine: string;
         historicalOrigins: string | null;
         appearanceCount: number;
         averagePrice: number | null;
@@ -25,8 +25,8 @@ export declare class DishesService {
         createdAt: Date;
         updatedAt: Date;
         name: string;
-        cuisine: string;
         description: string | null;
+        cuisine: string;
         historicalOrigins: string | null;
         appearanceCount: number;
         averagePrice: number | null;
@@ -40,8 +40,8 @@ export declare class DishesService {
         createdAt: Date;
         updatedAt: Date;
         name: string;
-        cuisine: string;
         description: string | null;
+        cuisine: string;
         historicalOrigins: string | null;
         appearanceCount: number;
         averagePrice: number | null;

@@ -46,6 +46,13 @@ const envSchema = z.object({
   // Logging
   LOG_LEVEL: z.enum(['debug', 'info', 'warn', 'error']).default('debug'),
   LOG_FORMAT: z.enum(['json', 'pretty']).default('pretty'),
+
+  // Swagger
+  SWAGGER_ENABLED: z.boolean().default(true),
+  SWAGGER_PATH: z.string().default('api-docs'),
+  SWAGGER_TITLE: z.string().default('Bellybook API'),
+  SWAGGER_DESCRIPTION: z.string().default('Bellybook 美食记录与分享平台 API'),
+  SWAGGER_VERSION: z.string().default('1.0'),
 });
 
 export type Env = z.infer<typeof envSchema>;

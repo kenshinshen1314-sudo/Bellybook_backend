@@ -1,4 +1,4 @@
-export interface CuisineMasterEntry {
+export declare class CuisineMasterEntry {
     rank: number;
     userId: string;
     username: string;
@@ -7,12 +7,12 @@ export interface CuisineMasterEntry {
     mealCount: number;
     firstMealAt: string;
 }
-export interface CuisineMastersDto {
+export declare class CuisineMastersDto {
     cuisineName?: string;
     period: string;
     masters: CuisineMasterEntry[];
 }
-export interface LeaderboardEntry {
+export declare class LeaderboardEntry {
     rank: number;
     userId: string;
     username: string;
@@ -21,12 +21,12 @@ export interface LeaderboardEntry {
     mealCount: number;
     cuisineCount: number;
 }
-export interface LeaderboardDto {
+export declare class LeaderboardDto {
     period: string;
     tier?: string;
     leaderboard: LeaderboardEntry[];
 }
-export interface GourmetEntry {
+export declare class GourmetEntry {
     rank: number;
     userId: string;
     username: string;
@@ -35,11 +35,11 @@ export interface GourmetEntry {
     mealCount: number;
     cuisines: string[];
 }
-export interface GourmetsDto {
+export declare class GourmetsDto {
     period: string;
     gourmets: GourmetEntry[];
 }
-export interface RankingStatsDto {
+export declare class RankingStatsDto {
     period: string;
     totalUsers: number;
     activeUsers: number;
@@ -47,7 +47,7 @@ export interface RankingStatsDto {
     totalCuisines: number;
     avgMealsPerUser: number;
 }
-export interface DishExpertEntry {
+export declare class DishExpertEntry {
     rank: number;
     userId: string;
     username: string;
@@ -57,11 +57,11 @@ export interface DishExpertEntry {
     dishes: string[];
     cuisines: string[];
 }
-export interface DishExpertsDto {
+export declare class DishExpertsDto {
     period: string;
     experts: DishExpertEntry[];
 }
-export interface CuisineExpertDishEntry {
+export declare class CuisineExpertDishEntry {
     dishName: string;
     cuisine: string;
     mealCount: number;
@@ -71,7 +71,7 @@ export interface CuisineExpertDishEntry {
     calories?: number;
     notes?: string;
 }
-export interface CuisineExpertDetailDto {
+export declare class CuisineExpertDetailDto {
     userId: string;
     username: string;
     avatarUrl: string | null;
@@ -81,7 +81,7 @@ export interface CuisineExpertDetailDto {
     totalMeals: number;
     dishes: CuisineExpertDishEntry[];
 }
-export interface UserCuisineStats {
+export declare class UserCuisineStats {
     rank: number;
     userId: string;
     username: string;
@@ -91,14 +91,14 @@ export interface UserCuisineStats {
     mealCount: number;
     firstMealAt: string;
 }
-export interface AllUsersDishesDto {
+export declare class AllUsersDishesDto {
     period: string;
     totalEntries: number;
     totalUsers: number;
     totalCuisines: number;
     entries: UserCuisineStats[];
 }
-export interface UnlockedDishEntry {
+export declare class UnlockedDishEntry {
     dishName: string;
     cuisine: string;
     mealCount: number;
@@ -107,7 +107,7 @@ export interface UnlockedDishEntry {
     imageUrl?: string;
     calories?: number;
 }
-export interface UserUnlockedDishesDto {
+export declare class UserUnlockedDishesDto {
     userId: string;
     username: string;
     avatarUrl: string | null;

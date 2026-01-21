@@ -30,6 +30,11 @@ const envSchema = zod_1.z.object({
     RATE_LIMIT_MAX: zod_1.z.coerce.number().default(100),
     LOG_LEVEL: zod_1.z.enum(['debug', 'info', 'warn', 'error']).default('debug'),
     LOG_FORMAT: zod_1.z.enum(['json', 'pretty']).default('pretty'),
+    SWAGGER_ENABLED: zod_1.z.boolean().default(true),
+    SWAGGER_PATH: zod_1.z.string().default('api-docs'),
+    SWAGGER_TITLE: zod_1.z.string().default('Bellybook API'),
+    SWAGGER_DESCRIPTION: zod_1.z.string().default('Bellybook 美食记录与分享平台 API'),
+    SWAGGER_VERSION: zod_1.z.string().default('1.0'),
 });
 const validateEnv = () => {
     const parsed = envSchema.safeParse(process.env);

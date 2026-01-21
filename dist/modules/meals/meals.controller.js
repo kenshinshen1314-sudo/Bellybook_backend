@@ -14,9 +14,11 @@ var __param = (this && this.__param) || function (paramIndex, decorator) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.MealsController = void 0;
 const common_1 = require("@nestjs/common");
+const swagger_1 = require("@nestjs/swagger");
 const meals_service_1 = require("./meals.service");
 const create_meal_dto_1 = require("./dto/create-meal.dto");
 const update_meal_dto_1 = require("./dto/update-meal.dto");
+const meal_response_dto_1 = require("./dto/meal-response.dto");
 const meal_query_dto_1 = require("./dto/meal-query.dto");
 const jwt_auth_guard_1 = require("../../common/guards/jwt-auth.guard");
 const current_user_decorator_1 = require("../../common/decorators/current-user.decorator");
@@ -56,6 +58,15 @@ let MealsController = class MealsController {
 exports.MealsController = MealsController;
 __decorate([
     (0, common_1.Get)(),
+    (0, swagger_1.ApiOperation)({
+        summary: '获取餐食列表',
+        description: '获取当前用户的餐食列表，支持分页和筛选',
+    }),
+    (0, swagger_1.ApiResponse)({
+        status: 200,
+        description: '获取成功',
+        type: meal_response_dto_1.PaginatedMealsDto,
+    }),
     __param(0, (0, current_user_decorator_1.CurrentUser)('userId')),
     __param(1, (0, common_1.Query)()),
     __metadata("design:type", Function),
@@ -64,6 +75,15 @@ __decorate([
 ], MealsController.prototype, "findAll", null);
 __decorate([
     (0, common_1.Get)('today'),
+    (0, swagger_1.ApiOperation)({
+        summary: '获取今日餐食',
+        description: '获取当前用户今天的所有餐食记录',
+    }),
+    (0, swagger_1.ApiResponse)({
+        status: 200,
+        description: '获取成功',
+        type: [meal_response_dto_1.MealResponseDto],
+    }),
     __param(0, (0, current_user_decorator_1.CurrentUser)('userId')),
     __metadata("design:type", Function),
     __metadata("design:paramtypes", [String]),
@@ -71,6 +91,31 @@ __decorate([
 ], MealsController.prototype, "getToday", null);
 __decorate([
     (0, common_1.Get)('by-date'),
+    (0, swagger_1.ApiOperation)({
+        summary: '按日期获取餐食',
+        description: '获取指定日期的所有餐食记录',
+    }),
+    (0, swagger_1.ApiQuery)({
+        name: 'date',
+        description: '日期 (YYYY-MM-DD 格式)',
+        example: '2024-01-15',
+    }),
+    (0, swagger_1.ApiResponse)({
+        status: 200,
+        description: '获取成功',
+        type: [meal_response_dto_1.MealResponseDto],
+    }),
+    (0, swagger_1.ApiResponse)({
+        status: 400,
+        description: '日期格式错误',
+        schema: {
+            example: {
+                statusCode: 400,
+                message: 'Invalid date format',
+                code: 'BAD_REQUEST',
+            },
+        },
+    }),
     __param(0, (0, current_user_decorator_1.CurrentUser)('userId')),
     __param(1, (0, common_1.Query)('date')),
     __metadata("design:type", Function),
@@ -79,6 +124,20 @@ __decorate([
 ], MealsController.prototype, "getByDate", null);
 __decorate([
     (0, common_1.Get)('by-dish/:dishName'),
+    (0, swagger_1.ApiOperation)({
+        summary: '按菜品名获取餐食',
+        description: '获取指定菜品名称的所有餐食记录',
+    }),
+    (0, swagger_1.ApiParam)({
+        name: 'dishName',
+        description: '菜品名称 (URL 编码)',
+        example: '宫保鸡丁',
+    }),
+    (0, swagger_1.ApiResponse)({
+        status: 200,
+        description: '获取成功',
+        type: [meal_response_dto_1.MealResponseDto],
+    }),
     __param(0, (0, current_user_decorator_1.CurrentUser)('userId')),
     __param(1, (0, common_1.Param)('dishName')),
     __metadata("design:type", Function),
@@ -87,6 +146,31 @@ __decorate([
 ], MealsController.prototype, "getByDishName", null);
 __decorate([
     (0, common_1.Get)(':id'),
+    (0, swagger_1.ApiOperation)({
+        summary: '获取单个餐食',
+        description: '根据 ID 获取指定餐食的详细信息',
+    }),
+    (0, swagger_1.ApiParam)({
+        name: 'id',
+        description: '餐食 ID',
+        example: 'cm1234567890',
+    }),
+    (0, swagger_1.ApiResponse)({
+        status: 200,
+        description: '获取成功',
+        type: meal_response_dto_1.MealResponseDto,
+    }),
+    (0, swagger_1.ApiResponse)({
+        status: 404,
+        description: '餐食不存在',
+        schema: {
+            example: {
+                statusCode: 404,
+                message: 'Meal not found',
+                code: 'NOT_FOUND',
+            },
+        },
+    }),
     __param(0, (0, current_user_decorator_1.CurrentUser)('userId')),
     __param(1, (0, common_1.Param)('id')),
     __metadata("design:type", Function),
@@ -95,6 +179,26 @@ __decorate([
 ], MealsController.prototype, "findOne", null);
 __decorate([
     (0, common_1.Post)(),
+    (0, swagger_1.ApiOperation)({
+        summary: '创建餐食',
+        description: '创建新的餐食记录',
+    }),
+    (0, swagger_1.ApiResponse)({
+        status: 201,
+        description: '创建成功',
+        type: meal_response_dto_1.MealResponseDto,
+    }),
+    (0, swagger_1.ApiResponse)({
+        status: 400,
+        description: '请求参数错误',
+        schema: {
+            example: {
+                statusCode: 400,
+                message: 'Bad Request',
+                code: 'BAD_REQUEST',
+            },
+        },
+    }),
     __param(0, (0, current_user_decorator_1.CurrentUser)('userId')),
     __param(1, (0, common_1.Body)()),
     __metadata("design:type", Function),
@@ -103,6 +207,31 @@ __decorate([
 ], MealsController.prototype, "create", null);
 __decorate([
     (0, common_1.Put)(':id'),
+    (0, swagger_1.ApiOperation)({
+        summary: '更新餐食',
+        description: '更新指定餐食的信息',
+    }),
+    (0, swagger_1.ApiParam)({
+        name: 'id',
+        description: '餐食 ID',
+        example: 'cm1234567890',
+    }),
+    (0, swagger_1.ApiResponse)({
+        status: 200,
+        description: '更新成功',
+        type: meal_response_dto_1.MealResponseDto,
+    }),
+    (0, swagger_1.ApiResponse)({
+        status: 404,
+        description: '餐食不存在',
+        schema: {
+            example: {
+                statusCode: 404,
+                message: 'Meal not found',
+                code: 'NOT_FOUND',
+            },
+        },
+    }),
     __param(0, (0, current_user_decorator_1.CurrentUser)('userId')),
     __param(1, (0, common_1.Param)('id')),
     __param(2, (0, common_1.Body)()),
@@ -112,6 +241,31 @@ __decorate([
 ], MealsController.prototype, "update", null);
 __decorate([
     (0, common_1.Delete)(':id'),
+    (0, swagger_1.ApiOperation)({
+        summary: '删除餐食',
+        description: '删除指定的餐食记录',
+    }),
+    (0, swagger_1.ApiParam)({
+        name: 'id',
+        description: '餐食 ID',
+        example: 'cm1234567890',
+    }),
+    (0, swagger_1.ApiResponse)({
+        status: 200,
+        description: '删除成功',
+        type: response_dto_1.SuccessResponse,
+    }),
+    (0, swagger_1.ApiResponse)({
+        status: 404,
+        description: '餐食不存在',
+        schema: {
+            example: {
+                statusCode: 404,
+                message: 'Meal not found',
+                code: 'NOT_FOUND',
+            },
+        },
+    }),
     __param(0, (0, current_user_decorator_1.CurrentUser)('userId')),
     __param(1, (0, common_1.Param)('id')),
     __metadata("design:type", Function),
@@ -119,6 +273,8 @@ __decorate([
     __metadata("design:returntype", Promise)
 ], MealsController.prototype, "remove", null);
 exports.MealsController = MealsController = __decorate([
+    (0, swagger_1.ApiTags)('Meals'),
+    (0, swagger_1.ApiBearerAuth)('bearer'),
     (0, common_1.Controller)('meals'),
     (0, common_1.UseGuards)(jwt_auth_guard_1.JwtAuthGuard),
     __metadata("design:paramtypes", [meals_service_1.MealsService])

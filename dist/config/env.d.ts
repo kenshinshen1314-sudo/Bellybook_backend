@@ -39,6 +39,11 @@ declare const envSchema: z.ZodObject<{
         json: "json";
         pretty: "pretty";
     }>>;
+    SWAGGER_ENABLED: z.ZodDefault<z.ZodBoolean>;
+    SWAGGER_PATH: z.ZodDefault<z.ZodString>;
+    SWAGGER_TITLE: z.ZodDefault<z.ZodString>;
+    SWAGGER_DESCRIPTION: z.ZodDefault<z.ZodString>;
+    SWAGGER_VERSION: z.ZodDefault<z.ZodString>;
 }, z.core.$strip>;
 export type Env = z.infer<typeof envSchema>;
 export declare const validateEnv: () => Env;
@@ -67,6 +72,11 @@ export declare const env: {
     RATE_LIMIT_MAX: number;
     LOG_LEVEL: "info" | "warn" | "error" | "debug";
     LOG_FORMAT: "json" | "pretty";
+    SWAGGER_ENABLED: boolean;
+    SWAGGER_PATH: string;
+    SWAGGER_TITLE: string;
+    SWAGGER_DESCRIPTION: string;
+    SWAGGER_VERSION: string;
     GEMINI_API_KEY?: string | undefined;
     HTTPS_PROXY?: string | undefined;
 };

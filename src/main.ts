@@ -9,10 +9,15 @@ import { ValidationPipe, VersioningType, Logger } from '@nestjs/common';
 import { AppModule } from './app.module';
 import { env } from './config/env';
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
+import { createSwaggerConfig, setupSwagger } from './config/swagger/swagger.config';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
   const logger = new Logger('Bootstrap');
+
+  // Swagger API 文档（必须在 CORS 之前配置）
+  const swaggerDocument = createSwaggerConfig();
+  setupSwagger(app, swaggerDocument);
 
   // 全局异常过滤器（必须在最前）
   app.useGlobalFilters(new AllExceptionsFilter());
@@ -47,6 +52,11 @@ async function bootstrap() {
   logger.log(`🚀 Application is running on: http://localhost:${env.PORT}/api/v1`);
   logger.log(`📚 Environment: ${env.NODE_ENV}`);
   logger.log(`🔐 CORS origins: ${env.CORS_ORIGIN}`);
+
+  // Swagger 文档地址
+  if (env.SWAGGER_ENABLED) {
+    logger.log(`📚 Swagger documentation: http://localhost:${env.PORT}/${env.SWAGGER_PATH}`);
+  }
 }
 
 bootstrap();

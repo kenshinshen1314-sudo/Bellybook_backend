@@ -15,6 +15,7 @@ var StorageController_1;
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.StorageController = void 0;
 const common_1 = require("@nestjs/common");
+const swagger_1 = require("@nestjs/swagger");
 const platform_express_1 = require("@nestjs/platform-express");
 const storage_service_1 = require("./storage.service");
 const ai_service_1 = require("../ai/ai.service");
@@ -98,6 +99,44 @@ let StorageController = StorageController_1 = class StorageController {
 exports.StorageController = StorageController;
 __decorate([
     (0, common_1.Post)('upload'),
+    (0, swagger_1.ApiOperation)({
+        summary: '上传图片',
+        description: '上传图片到 Supabase Storage，返回图片 URL 和缩略图 URL',
+    }),
+    (0, swagger_1.ApiConsumes)('multipart/form-data'),
+    (0, swagger_1.ApiBody)({
+        schema: {
+            type: 'object',
+            properties: {
+                file: {
+                    type: 'string',
+                    format: 'binary',
+                },
+            },
+        },
+    }),
+    (0, swagger_1.ApiResponse)({
+        status: 201,
+        description: '上传成功',
+        schema: {
+            example: {
+                url: 'https://xxx.supabase.co/storage/v1/object/public/meal-images/xxx.jpg',
+                thumbnailUrl: 'https://xxx.supabase.co/storage/v1/object/public/meal-images/thumbnails/xxx.jpg',
+                path: 'user-id/xxx.jpg',
+            },
+        },
+    }),
+    (0, swagger_1.ApiResponse)({
+        status: 400,
+        description: '文件格式或大小不符合要求',
+        schema: {
+            example: {
+                statusCode: 400,
+                message: 'Invalid file type or size exceeds limit',
+                code: 'BAD_REQUEST',
+            },
+        },
+    }),
     (0, common_1.UseInterceptors)((0, platform_express_1.FileInterceptor)('file')),
     __param(0, (0, current_user_decorator_1.CurrentUser)('userId')),
     __param(1, (0, common_1.UploadedFile)()),
@@ -107,6 +146,72 @@ __decorate([
 ], StorageController.prototype, "uploadImage", null);
 __decorate([
     (0, common_1.Post)('upload-with-analysis'),
+    (0, swagger_1.ApiOperation)({
+        summary: '上传图片并 AI 分析',
+        description: '上传图片并进行 AI 食物分析，自动创建餐食记录。注意：此接口会消耗每日 AI 分析配额',
+    }),
+    (0, swagger_1.ApiConsumes)('multipart/form-data'),
+    (0, swagger_1.ApiBody)({
+        schema: {
+            type: 'object',
+            properties: {
+                file: {
+                    type: 'string',
+                    format: 'binary',
+                },
+            },
+        },
+    }),
+    (0, swagger_1.ApiResponse)({
+        status: 201,
+        description: '上传和分析成功，返回完整的餐食记录',
+        schema: {
+            example: {
+                upload: {
+                    url: 'https://xxx.supabase.co/storage/v1/object/public/meal-images/xxx.jpg',
+                    thumbnailUrl: 'https://xxx.supabase.co/storage/v1/object/public/meal-images/thumbnails/xxx.jpg',
+                    path: 'user-id/xxx.jpg',
+                },
+                analysis: {
+                    dishes: [
+                        {
+                            foodName: '宫保鸡丁',
+                            cuisine: '川菜',
+                            confidence: 0.95,
+                            ingredients: ['鸡胸肉', '花生', '辣椒'],
+                            nutrition: { calories: 320, protein: 25, carbs: 12, fat: 18 },
+                        },
+                    ],
+                    summary: '这是一道经典的川菜，以鸡胸肉和花生为主要食材。',
+                },
+                meal: {
+                    id: 'cm1234567890',
+                    imageUrl: 'https://xxx.supabase.co/storage/v1/object/public/meal-images/xxx.jpg',
+                    mealType: 'SNACK',
+                    createdAt: '2024-01-15T10:30:00.000Z',
+                },
+                quota: {
+                    limit: 10,
+                    remaining: 9,
+                },
+            },
+        },
+    }),
+    (0, swagger_1.ApiResponse)({
+        status: 429,
+        description: 'AI 分析配额已用完',
+        schema: {
+            example: {
+                statusCode: 429,
+                message: 'Daily AI analysis quota exceeded. Limit: 10, please try again tomorrow.',
+                error: 'QUOTA_EXCEEDED',
+                quota: {
+                    limit: 10,
+                    remaining: 0,
+                },
+            },
+        },
+    }),
     (0, common_1.UseInterceptors)((0, platform_express_1.FileInterceptor)('file')),
     __param(0, (0, current_user_decorator_1.CurrentUser)('userId')),
     __param(1, (0, common_1.UploadedFile)()),
@@ -116,6 +221,39 @@ __decorate([
 ], StorageController.prototype, "uploadWithAnalysis", null);
 __decorate([
     (0, common_1.Delete)('delete'),
+    (0, swagger_1.ApiOperation)({
+        summary: '删除文件',
+        description: '从 Supabase Storage 删除指定文件',
+    }),
+    (0, swagger_1.ApiBody)({
+        schema: {
+            type: 'object',
+            properties: {
+                key: {
+                    type: 'string',
+                    description: '文件存储路径',
+                    example: 'user-id/xxx.jpg',
+                },
+            },
+            required: ['key'],
+        },
+    }),
+    (0, swagger_1.ApiResponse)({
+        status: 200,
+        description: '删除成功',
+        type: response_dto_1.SuccessResponse,
+    }),
+    (0, swagger_1.ApiResponse)({
+        status: 404,
+        description: '文件不存在',
+        schema: {
+            example: {
+                statusCode: 404,
+                message: 'File not found',
+                code: 'NOT_FOUND',
+            },
+        },
+    }),
     __param(0, (0, common_1.Body)('key')),
     __metadata("design:type", Function),
     __metadata("design:paramtypes", [String]),
@@ -123,6 +261,38 @@ __decorate([
 ], StorageController.prototype, "deleteFile", null);
 __decorate([
     (0, common_1.Post)('presigned-url'),
+    (0, swagger_1.ApiOperation)({
+        summary: '获取预签名 URL',
+        description: '获取用于直接上传文件的预签名 URL，客户端可直接使用此 URL 上传文件',
+    }),
+    (0, swagger_1.ApiBody)({
+        schema: {
+            type: 'object',
+            properties: {
+                filename: {
+                    type: 'string',
+                    description: '文件名',
+                    example: 'photo.jpg',
+                },
+                type: {
+                    type: 'string',
+                    description: '文件类型',
+                    example: 'image/jpeg',
+                },
+            },
+            required: ['filename', 'type'],
+        },
+    }),
+    (0, swagger_1.ApiResponse)({
+        status: 201,
+        description: '生成成功',
+        schema: {
+            example: {
+                url: 'https://xxx.supabase.co/storage/v1/object/sign/meal-images/xxx.jpg?token=xxx',
+                path: 'user-id/xxx.jpg',
+            },
+        },
+    }),
     __param(0, (0, common_1.Body)('filename')),
     __param(1, (0, common_1.Body)('type')),
     __metadata("design:type", Function),
@@ -130,6 +300,8 @@ __decorate([
     __metadata("design:returntype", Promise)
 ], StorageController.prototype, "getPresignedUrl", null);
 exports.StorageController = StorageController = StorageController_1 = __decorate([
+    (0, swagger_1.ApiTags)('Storage'),
+    (0, swagger_1.ApiBearerAuth)('bearer'),
     (0, common_1.Controller)('storage'),
     (0, common_1.UseGuards)(jwt_auth_guard_1.JwtAuthGuard),
     __metadata("design:paramtypes", [storage_service_1.StorageService,
