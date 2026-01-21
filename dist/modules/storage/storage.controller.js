@@ -37,37 +37,53 @@ let StorageController = class StorageController {
         return this.storageService.uploadImage(userId, file);
     }
     async uploadWithAnalysis(userId, file) {
-        const quota = await this.usersService.checkAnalysisQuota(userId);
-        if (!quota.allowed) {
-            throw new common_1.HttpException({
-                statusCode: common_1.HttpStatus.TOO_MANY_REQUESTS,
-                message: `Daily AI analysis quota exceeded. Limit: ${quota.limit}, please try again tomorrow.`,
-                error: 'QUOTA_EXCEEDED',
+        try {
+            console.log('[StorageController] uploadWithAnalysis called, userId:', userId);
+            const quota = await this.usersService.checkAnalysisQuota(userId);
+            console.log('[StorageController] quota check result:', quota);
+            if (!quota.allowed) {
+                throw new common_1.HttpException({
+                    statusCode: common_1.HttpStatus.TOO_MANY_REQUESTS,
+                    message: `Daily AI analysis quota exceeded. Limit: ${quota.limit}, please try again tomorrow.`,
+                    error: 'QUOTA_EXCEEDED',
+                    quota: {
+                        limit: quota.limit,
+                        remaining: quota.remaining,
+                    },
+                }, common_1.HttpStatus.TOO_MANY_REQUESTS);
+            }
+            console.log('[StorageController] uploading image...');
+            const uploadResult = await this.storageService.uploadImage(userId, file);
+            console.log('[StorageController] upload result:', uploadResult);
+            const imageBase64 = this.storageService.fileToBase64(file);
+            console.log('[StorageController] image converted to base64, length:', imageBase64?.length);
+            console.log('[StorageController] starting AI analysis...');
+            const analysis = await this.aiService.analyzeFoodImage(imageBase64);
+            console.log('[StorageController] AI analysis completed:', analysis?.foodName);
+            await this.usersService.incrementAnalysisCount(userId);
+            console.log('[StorageController] creating meal record...');
+            const meal = await this.mealsService.create(userId, {
+                imageUrl: uploadResult.url,
+                thumbnailUrl: uploadResult.thumbnailUrl,
+                analysis: analysis,
+                mealType: 'SNACK',
+            });
+            console.log('[StorageController] meal created:', meal?.id);
+            return {
+                upload: uploadResult,
+                analysis,
+                meal,
                 quota: {
                     limit: quota.limit,
-                    remaining: quota.remaining,
+                    remaining: quota.remaining - 1,
                 },
-            }, common_1.HttpStatus.TOO_MANY_REQUESTS);
+            };
         }
-        const uploadResult = await this.storageService.uploadImage(userId, file);
-        const imageBase64 = this.storageService.fileToBase64(file);
-        const analysis = await this.aiService.analyzeFoodImage(imageBase64);
-        await this.usersService.incrementAnalysisCount(userId);
-        const meal = await this.mealsService.create(userId, {
-            imageUrl: uploadResult.url,
-            thumbnailUrl: uploadResult.thumbnailUrl,
-            analysis: analysis,
-            mealType: 'SNACK',
-        });
-        return {
-            upload: uploadResult,
-            analysis,
-            meal,
-            quota: {
-                limit: quota.limit,
-                remaining: quota.remaining - 1,
-            },
-        };
+        catch (error) {
+            console.error('[StorageController] uploadWithAnalysis error:', error);
+            console.error('[StorageController] error stack:', error?.stack);
+            throw error;
+        }
     }
     async processAiAnalysis(userId, mealId, imageBase64, uploadResult) {
         try {

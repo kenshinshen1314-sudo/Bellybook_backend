@@ -3,6 +3,9 @@ import { GoogleGenerativeAI } from '@google/generative-ai';
 import { env } from '../../config/env';
 import { HttpsProxyAgent } from 'https-proxy-agent';
 
+const MAX_RETRIES = 3;
+const BASE_DELAY_MS = 1000;
+
 @Injectable()
 export class AiService implements OnModuleInit {
   private readonly logger = new Logger(AiService.name);
@@ -81,6 +84,32 @@ export class AiService implements OnModuleInit {
   }
 
   /**
+   * 延迟函数，用于重试间隔
+   */
+  private delay(ms: number): Promise<void> {
+    return new Promise(resolve => setTimeout(resolve, ms));
+  }
+
+  /**
+   * 判断错误是否为可重试的错误
+   */
+  private isRetriableError(error: any): boolean {
+    // 503 Service Unavailable - 服务过载
+    if (error?.status === 503) return true;
+    // 429 Too Many Requests - 速率限制
+    if (error?.status === 429) return true;
+    // 500 Internal Server Error - 服务器错误
+    if (error?.status === 500) return true;
+    // 502 Bad Gateway
+    if (error?.status === 502) return true;
+    // 504 Gateway Timeout
+    if (error?.status === 504) return true;
+    // 网络错误
+    if (error?.code === 'ECONNRESET' || error?.code === 'ETIMEDOUT' || error?.code === 'ENOTFOUND') return true;
+    return false;
+  }
+
+  /**
    * 分析食物图像并返回营养信息
    */
   async analyzeFoodImage(imageBase64: string): Promise<{
@@ -95,6 +124,16 @@ export class AiService implements OnModuleInit {
       sugar?: number;
       sodium?: number;
     };
+    dishes?: Array<{
+      foodName: string;
+      cuisine?: string;
+      nutrition: {
+        calories: number;
+        protein: number;
+        fat: number;
+        carbohydrates: number;
+      };
+    }>;
     plating?: string;
     description?: string;
     ingredients?: string[];
@@ -104,12 +143,15 @@ export class AiService implements OnModuleInit {
     foodPrice?: number;
     dishSuggestion?: string;
   }> {
-    try {
-      const model = this.genAI.getGenerativeModel({
-        model: env.GEMINI_MODEL,
-      });
+    let lastError: any;
 
-      const diningTimeScenery = this.getDiningTimeScenery();
+    for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+      try {
+        const model = this.genAI.getGenerativeModel({
+          model: env.GEMINI_MODEL,
+        });
+
+        const diningTimeScenery = this.getDiningTimeScenery();
 
       // 构建提示词
       const prompt = `你是一位专业的美食分析师。请仔细分析这张食物图片，并严格按照以下 JSON 格式返回分析结果。
@@ -117,18 +159,42 @@ export class AiService implements OnModuleInit {
 ## 输出要求
 1. 必须是纯 JSON 格式，不要使用 markdown 代码块（不要用 \`\`\`json 包裹）
 2. 所有数值必须是数字类型，不要带单位
-3. ingredients 数组至少包含 3 个主要食材
-4. 菜系请从标准分类中选择
+3. 如果图片中有多道菜，必须在 dishes 数组中分别列出每道菜的营养信息
+4. 如果只有一道菜，dishes 数组只包含一道菜的数据即可
+5. ingredients 数组至少包含 3 个主要食材
+6. 菜系请从标准分类中选择
 
 ## JSON Schema
 {
-  "foodName": "具体菜名，如：宫保鸡丁",
-  "cuisine": "菜系分类（川菜/粤菜/鲁菜/苏菜/浙菜/湘菜/闽菜/徽菜/京菜/东北菜/西北菜/云贵菜/西餐/日料/韩料/东南亚菜/印度菜/家常菜/其他）",
+  "foodName": "主菜品名称（如果有多个菜品，填写主要菜品）",
+  "cuisine": "主要菜系分类（川菜/粤菜/鲁菜/苏菜/浙菜/湘菜/闽菜/徽菜/京菜/东北菜/西北菜/云贵菜/西餐/日料/韩料/东南亚菜/印度菜/家常菜/其他）",
+  "dishes": [
+    {
+      "foodName": "菜品1名称，如：宫保鸡丁",
+      "cuisine": "该菜的菜系",
+      "nutrition": {
+        "calories": "该菜的热量（千卡）",
+        "protein": "该菜的蛋白质（克）",
+        "fat": "该菜的脂肪（克）",
+        "carbohydrates": "该菜的碳水（克）"
+      }
+    },
+    {
+      "foodName": "菜品2名称（如果有）",
+      "cuisine": "该菜的菜系",
+      "nutrition": {
+        "calories": "该菜的热量（千卡）",
+        "protein": "该菜的蛋白质（克）",
+        "fat": "该菜的脂肪（克）",
+        "carbohydrates": "该菜的碳水（克）"
+      }
+    }
+  ],
   "nutrition": {
-    "calories": "根据图片中的分量估算总热量（千卡），一般正餐300-800，小吃100-300",
-    "protein": "蛋白质含量（克），参考同类菜品标准值",
-    "fat": "脂肪含量（克），注意调料和油脂含量",
-    "carbohydrates": "碳水化合物（克），包含主食和糖分",
+    "calories": "所有菜品的总热量（千卡），如果只有一道菜就是该菜的热量",
+    "protein": "蛋白质总含量（克）",
+    "fat": "脂肪总含量（克）",
+    "carbohydrates": "碳水化合物总含量（克）",
     "fiber": "膳食纤维（克），蔬菜含量高的菜品数值较高",
     "sugar": "添加糖分（克），甜品类较高",
     "sodium": "钠含量（毫克），重油重盐菜品数值较高，一般500-3000"
@@ -217,6 +283,16 @@ export class AiService implements OnModuleInit {
           sugar: analysis.nutrition.sugar ? Number(analysis.nutrition.sugar) : undefined,
           sodium: analysis.nutrition.sodium ? Number(analysis.nutrition.sodium) : undefined,
         },
+        dishes: analysis.dishes?.map((dish: any) => ({
+          foodName: dish.foodName,
+          cuisine: dish.cuisine,
+          nutrition: {
+            calories: Number(dish.nutrition?.calories) || 0,
+            protein: Number(dish.nutrition?.protein) || 0,
+            fat: Number(dish.nutrition?.fat) || 0,
+            carbohydrates: Number(dish.nutrition?.carbohydrates) || 0,
+          },
+        })) || [],
         plating: analysis.plating,
         description: analysis.description,
         ingredients: analysis.ingredients,
@@ -226,14 +302,38 @@ export class AiService implements OnModuleInit {
         foodPrice: analysis.foodPrice ? Number(analysis.foodPrice) : undefined,
         dishSuggestion: analysis.dishSuggestion,
       };
-    } catch (error) {
-      if (error instanceof SyntaxError) {
-        this.logger.error('Failed to parse AI response as JSON', error.stack);
-        throw new Error('AI returned invalid JSON format');
+      // 成功则直接返回，不进行重试
+      } catch (error) {
+        lastError = error;
+
+        // JSON 解析错误不重试
+        if (error instanceof SyntaxError) {
+          this.logger.error('Failed to parse AI response as JSON', error.stack);
+          throw new Error('AI returned invalid JSON format');
+        }
+
+        // 检查是否为可重试的错误
+        if (this.isRetriableError(error) && attempt < MAX_RETRIES - 1) {
+          const delayMs = BASE_DELAY_MS * Math.pow(2, attempt);
+          this.logger.warn(
+            `AI analysis attempt ${attempt + 1} failed (${error.status || error.code || 'unknown'}): ${error.message}. ` +
+            `Retrying in ${delayMs}ms...`
+          );
+          await this.delay(delayMs);
+          continue;
+        }
+
+        // 不可重试的错误或已达到最大重试次数
+        break;
       }
-      this.logger.error(`Failed to analyze food image: ${error.message}`, error.stack);
-      throw error;
     }
+
+    // 所有重试都失败
+    this.logger.error(
+      `Failed to analyze food image after ${MAX_RETRIES} attempts: ${lastError.message}`,
+      lastError.stack
+    );
+    throw lastError;
   }
 
   /**

@@ -12,6 +12,8 @@ const common_1 = require("@nestjs/common");
 const generative_ai_1 = require("@google/generative-ai");
 const env_1 = require("../../config/env");
 const https_proxy_agent_1 = require("https-proxy-agent");
+const MAX_RETRIES = 3;
+const BASE_DELAY_MS = 1000;
 let AiService = AiService_1 = class AiService {
     logger = new common_1.Logger(AiService_1.name);
     genAI;
@@ -79,29 +81,73 @@ let AiService = AiService_1 = class AiService {
         const suffixes = ['私语', '低语', '独白', '絮语', '慰藉'];
         return suffixes[Math.floor(Math.random() * suffixes.length)];
     }
+    delay(ms) {
+        return new Promise(resolve => setTimeout(resolve, ms));
+    }
+    isRetriableError(error) {
+        if (error?.status === 503)
+            return true;
+        if (error?.status === 429)
+            return true;
+        if (error?.status === 500)
+            return true;
+        if (error?.status === 502)
+            return true;
+        if (error?.status === 504)
+            return true;
+        if (error?.code === 'ECONNRESET' || error?.code === 'ETIMEDOUT' || error?.code === 'ENOTFOUND')
+            return true;
+        return false;
+    }
     async analyzeFoodImage(imageBase64) {
-        try {
-            const model = this.genAI.getGenerativeModel({
-                model: env_1.env.GEMINI_MODEL,
-            });
-            const diningTimeScenery = this.getDiningTimeScenery();
-            const prompt = `你是一位专业的美食分析师。请仔细分析这张食物图片，并严格按照以下 JSON 格式返回分析结果。
+        let lastError;
+        for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+            try {
+                const model = this.genAI.getGenerativeModel({
+                    model: env_1.env.GEMINI_MODEL,
+                });
+                const diningTimeScenery = this.getDiningTimeScenery();
+                const prompt = `你是一位专业的美食分析师。请仔细分析这张食物图片，并严格按照以下 JSON 格式返回分析结果。
 
 ## 输出要求
 1. 必须是纯 JSON 格式，不要使用 markdown 代码块（不要用 \`\`\`json 包裹）
 2. 所有数值必须是数字类型，不要带单位
-3. ingredients 数组至少包含 3 个主要食材
-4. 菜系请从标准分类中选择
+3. 如果图片中有多道菜，必须在 dishes 数组中分别列出每道菜的营养信息
+4. 如果只有一道菜，dishes 数组只包含一道菜的数据即可
+5. ingredients 数组至少包含 3 个主要食材
+6. 菜系请从标准分类中选择
 
 ## JSON Schema
 {
-  "foodName": "具体菜名，如：宫保鸡丁",
-  "cuisine": "菜系分类（川菜/粤菜/鲁菜/苏菜/浙菜/湘菜/闽菜/徽菜/京菜/东北菜/西北菜/云贵菜/西餐/日料/韩料/东南亚菜/印度菜/家常菜/其他）",
+  "foodName": "主菜品名称（如果有多个菜品，填写主要菜品）",
+  "cuisine": "主要菜系分类（川菜/粤菜/鲁菜/苏菜/浙菜/湘菜/闽菜/徽菜/京菜/东北菜/西北菜/云贵菜/西餐/日料/韩料/东南亚菜/印度菜/家常菜/其他）",
+  "dishes": [
+    {
+      "foodName": "菜品1名称，如：宫保鸡丁",
+      "cuisine": "该菜的菜系",
+      "nutrition": {
+        "calories": "该菜的热量（千卡）",
+        "protein": "该菜的蛋白质（克）",
+        "fat": "该菜的脂肪（克）",
+        "carbohydrates": "该菜的碳水（克）"
+      }
+    },
+    {
+      "foodName": "菜品2名称（如果有）",
+      "cuisine": "该菜的菜系",
+      "nutrition": {
+        "calories": "该菜的热量（千卡）",
+        "protein": "该菜的蛋白质（克）",
+        "fat": "该菜的脂肪（克）",
+        "carbohydrates": "该菜的碳水（克）"
+      }
+    }
+  ],
   "nutrition": {
-    "calories": "根据图片中的分量估算总热量（千卡），一般正餐300-800，小吃100-300",
-    "protein": "蛋白质含量（克），参考同类菜品标准值",
-    "fat": "脂肪含量（克），注意调料和油脂含量",
-    "carbohydrates": "碳水化合物（克），包含主食和糖分",
+    "calories": "所有菜品的总热量（千卡），如果只有一道菜就是该菜的热量",
+    "protein": "蛋白质总含量（克）",
+    "fat": "脂肪总含量（克）",
+    "carbohydrates": "碳水化合物总含量（克）",
     "fiber": "膳食纤维（克），蔬菜含量高的菜品数值较高",
     "sugar": "添加糖分（克），甜品类较高",
     "sodium": "钠含量（毫克），重油重盐菜品数值较高，一般500-3000"
@@ -116,81 +162,101 @@ let AiService = AiService_1 = class AiService {
 }
 
 现在请分析这张图片，返回纯 JSON 格式：`;
-            const result = await model.generateContent([
-                prompt,
-                {
-                    inlineData: {
-                        data: imageBase64,
-                        mimeType: 'image/jpeg',
+                const result = await model.generateContent([
+                    prompt,
+                    {
+                        inlineData: {
+                            data: imageBase64,
+                            mimeType: 'image/jpeg',
+                        },
                     },
-                },
-            ]);
-            const response = await result.response;
-            const text = response.text();
-            const jsonMatch = text.match(/\{[\s\S]*\}/);
-            if (!jsonMatch) {
-                throw new Error('Invalid response format from AI');
+                ]);
+                const response = await result.response;
+                const text = response.text();
+                const jsonMatch = text.match(/\{[\s\S]*\}/);
+                if (!jsonMatch) {
+                    throw new Error('Invalid response format from AI');
+                }
+                const analysis = JSON.parse(jsonMatch[0]);
+                if (!analysis.foodName || !analysis.cuisine || !analysis.nutrition) {
+                    throw new Error('Missing required fields in AI response');
+                }
+                if (!analysis.ingredients || !Array.isArray(analysis.ingredients) || analysis.ingredients.length < 2) {
+                    this.logger.warn(`Ingredients list is incomplete: ${JSON.stringify(analysis.ingredients)}`);
+                }
+                const { calories, protein, fat, carbohydrates, sodium } = analysis.nutrition;
+                if (typeof calories !== 'number' || calories < 0 || calories > 5000) {
+                    this.logger.warn(`Unusual calories detected: ${calories}, using fallback`);
+                    analysis.nutrition.calories = Math.max(0, Math.min(5000, Number(calories) || 300));
+                }
+                if (typeof protein !== 'number' || protein < 0 || protein > 200) {
+                    this.logger.warn(`Unusual protein detected: ${protein}, using fallback`);
+                    analysis.nutrition.protein = Math.max(0, Math.min(200, Number(protein) || 15));
+                }
+                if (typeof fat !== 'number' || fat < 0 || fat > 200) {
+                    this.logger.warn(`Unusual fat detected: ${fat}, using fallback`);
+                    analysis.nutrition.fat = Math.max(0, Math.min(200, Number(fat) || 20));
+                }
+                if (typeof carbohydrates !== 'number' || carbohydrates < 0 || carbohydrates > 500) {
+                    this.logger.warn(`Unusual carbohydrates detected: ${carbohydrates}, using fallback`);
+                    analysis.nutrition.carbohydrates = Math.max(0, Math.min(500, Number(carbohydrates) || 40));
+                }
+                if (sodium !== undefined && (typeof sodium !== 'number' || sodium < 0 || sodium > 10000)) {
+                    this.logger.warn(`Unusual sodium detected: ${sodium}, using fallback`);
+                    analysis.nutrition.sodium = Math.max(0, Math.min(10000, Number(sodium) || 1000));
+                }
+                const foodNamePoetic = `${this.getTimePrefix()}${analysis.foodName}${this.getPoeticSuffix()}`;
+                this.logger.log(`Successfully analyzed food: ${analysis.foodName}`);
+                return {
+                    foodName: analysis.foodName,
+                    cuisine: analysis.cuisine,
+                    nutrition: {
+                        calories: Number(analysis.nutrition.calories) || 0,
+                        protein: Number(analysis.nutrition.protein) || 0,
+                        fat: Number(analysis.nutrition.fat) || 0,
+                        carbohydrates: Number(analysis.nutrition.carbohydrates) || 0,
+                        fiber: analysis.nutrition.fiber ? Number(analysis.nutrition.fiber) : undefined,
+                        sugar: analysis.nutrition.sugar ? Number(analysis.nutrition.sugar) : undefined,
+                        sodium: analysis.nutrition.sodium ? Number(analysis.nutrition.sodium) : undefined,
+                    },
+                    dishes: analysis.dishes?.map((dish) => ({
+                        foodName: dish.foodName,
+                        cuisine: dish.cuisine,
+                        nutrition: {
+                            calories: Number(dish.nutrition?.calories) || 0,
+                            protein: Number(dish.nutrition?.protein) || 0,
+                            fat: Number(dish.nutrition?.fat) || 0,
+                            carbohydrates: Number(dish.nutrition?.carbohydrates) || 0,
+                        },
+                    })) || [],
+                    plating: analysis.plating,
+                    description: analysis.description,
+                    ingredients: analysis.ingredients,
+                    historicalOrigins: analysis.historicalOrigins,
+                    poeticDescription: analysis.poeticDescription,
+                    foodNamePoetic,
+                    foodPrice: analysis.foodPrice ? Number(analysis.foodPrice) : undefined,
+                    dishSuggestion: analysis.dishSuggestion,
+                };
             }
-            const analysis = JSON.parse(jsonMatch[0]);
-            if (!analysis.foodName || !analysis.cuisine || !analysis.nutrition) {
-                throw new Error('Missing required fields in AI response');
+            catch (error) {
+                lastError = error;
+                if (error instanceof SyntaxError) {
+                    this.logger.error('Failed to parse AI response as JSON', error.stack);
+                    throw new Error('AI returned invalid JSON format');
+                }
+                if (this.isRetriableError(error) && attempt < MAX_RETRIES - 1) {
+                    const delayMs = BASE_DELAY_MS * Math.pow(2, attempt);
+                    this.logger.warn(`AI analysis attempt ${attempt + 1} failed (${error.status || error.code || 'unknown'}): ${error.message}. ` +
+                        `Retrying in ${delayMs}ms...`);
+                    await this.delay(delayMs);
+                    continue;
+                }
+                break;
             }
-            if (!analysis.ingredients || !Array.isArray(analysis.ingredients) || analysis.ingredients.length < 2) {
-                this.logger.warn(`Ingredients list is incomplete: ${JSON.stringify(analysis.ingredients)}`);
-            }
-            const { calories, protein, fat, carbohydrates, sodium } = analysis.nutrition;
-            if (typeof calories !== 'number' || calories < 0 || calories > 5000) {
-                this.logger.warn(`Unusual calories detected: ${calories}, using fallback`);
-                analysis.nutrition.calories = Math.max(0, Math.min(5000, Number(calories) || 300));
-            }
-            if (typeof protein !== 'number' || protein < 0 || protein > 200) {
-                this.logger.warn(`Unusual protein detected: ${protein}, using fallback`);
-                analysis.nutrition.protein = Math.max(0, Math.min(200, Number(protein) || 15));
-            }
-            if (typeof fat !== 'number' || fat < 0 || fat > 200) {
-                this.logger.warn(`Unusual fat detected: ${fat}, using fallback`);
-                analysis.nutrition.fat = Math.max(0, Math.min(200, Number(fat) || 20));
-            }
-            if (typeof carbohydrates !== 'number' || carbohydrates < 0 || carbohydrates > 500) {
-                this.logger.warn(`Unusual carbohydrates detected: ${carbohydrates}, using fallback`);
-                analysis.nutrition.carbohydrates = Math.max(0, Math.min(500, Number(carbohydrates) || 40));
-            }
-            if (sodium !== undefined && (typeof sodium !== 'number' || sodium < 0 || sodium > 10000)) {
-                this.logger.warn(`Unusual sodium detected: ${sodium}, using fallback`);
-                analysis.nutrition.sodium = Math.max(0, Math.min(10000, Number(sodium) || 1000));
-            }
-            const foodNamePoetic = `${this.getTimePrefix()}${analysis.foodName}${this.getPoeticSuffix()}`;
-            this.logger.log(`Successfully analyzed food: ${analysis.foodName}`);
-            return {
-                foodName: analysis.foodName,
-                cuisine: analysis.cuisine,
-                nutrition: {
-                    calories: Number(analysis.nutrition.calories) || 0,
-                    protein: Number(analysis.nutrition.protein) || 0,
-                    fat: Number(analysis.nutrition.fat) || 0,
-                    carbohydrates: Number(analysis.nutrition.carbohydrates) || 0,
-                    fiber: analysis.nutrition.fiber ? Number(analysis.nutrition.fiber) : undefined,
-                    sugar: analysis.nutrition.sugar ? Number(analysis.nutrition.sugar) : undefined,
-                    sodium: analysis.nutrition.sodium ? Number(analysis.nutrition.sodium) : undefined,
-                },
-                plating: analysis.plating,
-                description: analysis.description,
-                ingredients: analysis.ingredients,
-                historicalOrigins: analysis.historicalOrigins,
-                poeticDescription: analysis.poeticDescription,
-                foodNamePoetic,
-                foodPrice: analysis.foodPrice ? Number(analysis.foodPrice) : undefined,
-                dishSuggestion: analysis.dishSuggestion,
-            };
         }
-        catch (error) {
-            if (error instanceof SyntaxError) {
-                this.logger.error('Failed to parse AI response as JSON', error.stack);
-                throw new Error('AI returned invalid JSON format');
-            }
-            this.logger.error(`Failed to analyze food image: ${error.message}`, error.stack);
-            throw error;
-        }
+        this.logger.error(`Failed to analyze food image after ${MAX_RETRIES} attempts: ${lastError.message}`, lastError.stack);
+        throw lastError;
     }
     imageToBase64(buffer) {
         return buffer.toString('base64');

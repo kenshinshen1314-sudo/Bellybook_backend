@@ -29,6 +29,16 @@ export declare class StorageController {
                 sugar?: number;
                 sodium?: number;
             };
+            dishes?: Array<{
+                foodName: string;
+                cuisine?: string;
+                nutrition: {
+                    calories: number;
+                    protein: number;
+                    fat: number;
+                    carbohydrates: number;
+                };
+            }>;
             plating?: string;
             description?: string;
             ingredients?: string[];

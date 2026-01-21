@@ -37,54 +37,70 @@ export class StorageController {
     @CurrentUser('userId') userId: string,
     @UploadedFile() file: Express.Multer.File,
   ) {
-    // 0. 检查配额
-    const quota = await this.usersService.checkAnalysisQuota(userId);
+    try {
+      console.log('[StorageController] uploadWithAnalysis called, userId:', userId);
 
-    if (!quota.allowed) {
-      throw new HttpException(
-        {
-          statusCode: HttpStatus.TOO_MANY_REQUESTS,
-          message: `Daily AI analysis quota exceeded. Limit: ${quota.limit}, please try again tomorrow.`,
-          error: 'QUOTA_EXCEEDED',
-          quota: {
-            limit: quota.limit,
-            remaining: quota.remaining,
+      // 0. 检查配额
+      const quota = await this.usersService.checkAnalysisQuota(userId);
+      console.log('[StorageController] quota check result:', quota);
+
+      if (!quota.allowed) {
+        throw new HttpException(
+          {
+            statusCode: HttpStatus.TOO_MANY_REQUESTS,
+            message: `Daily AI analysis quota exceeded. Limit: ${quota.limit}, please try again tomorrow.`,
+            error: 'QUOTA_EXCEEDED',
+            quota: {
+              limit: quota.limit,
+              remaining: quota.remaining,
+            },
           },
+          HttpStatus.TOO_MANY_REQUESTS,
+        );
+      }
+
+      // 1. 上传图片
+      console.log('[StorageController] uploading image...');
+      const uploadResult = await this.storageService.uploadImage(userId, file);
+      console.log('[StorageController] upload result:', uploadResult);
+
+      // 2. 转换图片为 base64 用于 AI 分析
+      const imageBase64 = this.storageService.fileToBase64(file);
+      console.log('[StorageController] image converted to base64, length:', imageBase64?.length);
+
+      // 3. 同步执行 AI 分析（等待结果）
+      console.log('[StorageController] starting AI analysis...');
+      const analysis = await this.aiService.analyzeFoodImage(imageBase64);
+      console.log('[StorageController] AI analysis completed:', analysis?.foodName);
+
+      // 4. 增加配额使用计数
+      await this.usersService.incrementAnalysisCount(userId);
+
+      // 5. 创建完整的 meal 记录
+      console.log('[StorageController] creating meal record...');
+      const meal = await this.mealsService.create(userId, {
+        imageUrl: uploadResult.url,
+        thumbnailUrl: uploadResult.thumbnailUrl,
+        analysis: analysis as any,
+        mealType: 'SNACK',
+      });
+      console.log('[StorageController] meal created:', meal?.id);
+
+      // 6. 返回完整结果
+      return {
+        upload: uploadResult,
+        analysis,
+        meal,
+        quota: {
+          limit: quota.limit,
+          remaining: quota.remaining - 1,
         },
-        HttpStatus.TOO_MANY_REQUESTS,
-      );
+      };
+    } catch (error) {
+      console.error('[StorageController] uploadWithAnalysis error:', error);
+      console.error('[StorageController] error stack:', error?.stack);
+      throw error;
     }
-
-    // 1. 上传图片
-    const uploadResult = await this.storageService.uploadImage(userId, file);
-
-    // 2. 转换图片为 base64 用于 AI 分析
-    const imageBase64 = this.storageService.fileToBase64(file);
-
-    // 3. 同步执行 AI 分析（等待结果）
-    const analysis = await this.aiService.analyzeFoodImage(imageBase64);
-
-    // 4. 增加配额使用计数
-    await this.usersService.incrementAnalysisCount(userId);
-
-    // 5. 创建完整的 meal 记录
-    const meal = await this.mealsService.create(userId, {
-      imageUrl: uploadResult.url,
-      thumbnailUrl: uploadResult.thumbnailUrl,
-      analysis: analysis as any,
-      mealType: 'SNACK',
-    });
-
-    // 6. 返回完整结果
-    return {
-      upload: uploadResult,
-      analysis,
-      meal,
-      quota: {
-        limit: quota.limit,
-        remaining: quota.remaining - 1,
-      },
-    };
   }
 
   /**
