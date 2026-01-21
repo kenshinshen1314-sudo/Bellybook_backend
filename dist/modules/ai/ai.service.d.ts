@@ -7,23 +7,13 @@ export declare class AiService implements OnModuleInit {
     private getDiningTimeScenery;
     private getTimePrefix;
     private getPoeticSuffix;
+    private _validateAndNormalizeNutrition;
     private delay;
     private isRetriableError;
     analyzeFoodImage(imageBase64: string): Promise<{
-        foodName: string;
-        cuisine: string;
-        nutrition: {
-            calories: number;
-            protein: number;
-            fat: number;
-            carbohydrates: number;
-            fiber?: number;
-            sugar?: number;
-            sodium?: number;
-        };
-        dishes?: Array<{
+        dishes: Array<{
             foodName: string;
-            cuisine?: string;
+            cuisine: string;
             nutrition: {
                 calories: number;
                 protein: number;
@@ -31,6 +21,12 @@ export declare class AiService implements OnModuleInit {
                 carbohydrates: number;
             };
         }>;
+        nutrition: {
+            calories: number;
+            protein: number;
+            fat: number;
+            carbohydrates: number;
+        };
         plating?: string;
         description?: string;
         ingredients?: string[];

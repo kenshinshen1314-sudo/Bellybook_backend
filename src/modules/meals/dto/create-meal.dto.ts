@@ -43,12 +43,27 @@ export class Ingredient {
   description?: string;
 }
 
-export class MealAnalysis {
+export class DishInfo {
   @IsString()
   foodName!: string;
 
   @IsString()
   cuisine!: string;
+
+  @ValidateNested()
+  nutrition!: Nutrition;
+}
+
+export class MealAnalysis {
+  // 核心：菜品数组（统一数据结构）
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => DishInfo)
+  dishes!: DishInfo[];
+
+  // 总营养数据（所有菜品汇总）
+  @ValidateNested()
+  nutrition!: Nutrition;
 
   @IsOptional()
   @IsString()
@@ -65,9 +80,6 @@ export class MealAnalysis {
   @IsOptional()
   @IsString()
   description?: string;
-
-  @ValidateNested()
-  nutrition!: Nutrition;
 
   @IsOptional()
   @IsArray()
@@ -99,8 +111,13 @@ export class MealAnalysis {
   @IsString()
   nutritionCommentary?: string;
 
+  @IsOptional()
   @IsString()
-  analyzedAt!: string;
+  dishSuggestion?: string;
+
+  @IsOptional()
+  @IsString()
+  analyzedAt?: string;
 }
 
 export class CreateMealDto {

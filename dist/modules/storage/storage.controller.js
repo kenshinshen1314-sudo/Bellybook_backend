@@ -59,7 +59,7 @@ let StorageController = class StorageController {
             console.log('[StorageController] image converted to base64, length:', imageBase64?.length);
             console.log('[StorageController] starting AI analysis...');
             const analysis = await this.aiService.analyzeFoodImage(imageBase64);
-            console.log('[StorageController] AI analysis completed:', analysis?.foodName);
+            console.log('[StorageController] AI analysis completed:', analysis?.dishes?.[0]?.foodName);
             await this.usersService.incrementAnalysisCount(userId);
             console.log('[StorageController] creating meal record...');
             const meal = await this.mealsService.create(userId, {
@@ -96,8 +96,8 @@ let StorageController = class StorageController {
                 fat: analysis.nutrition.fat,
                 carbohydrates: analysis.nutrition.carbohydrates,
                 price: analysis.foodPrice,
-                foodName: analysis.foodName,
-                cuisine: analysis.cuisine,
+                foodName: analysis.dishes[0]?.foodName,
+                cuisine: analysis.dishes[0]?.cuisine,
                 description: analysis.description,
                 historicalOrigins: analysis.historicalOrigins,
             });

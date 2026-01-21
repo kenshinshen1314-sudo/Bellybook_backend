@@ -13,14 +13,18 @@ export declare class Ingredient {
     icon?: string;
     description?: string;
 }
-export declare class MealAnalysis {
+export declare class DishInfo {
     foodName: string;
     cuisine: string;
+    nutrition: Nutrition;
+}
+export declare class MealAnalysis {
+    dishes: DishInfo[];
+    nutrition: Nutrition;
     plating?: string;
     sensory?: string;
     container?: string;
     description?: string;
-    nutrition: Nutrition;
     ingredients?: string[];
     suggestions?: string[];
     poeticDescription?: string;
@@ -28,7 +32,8 @@ export declare class MealAnalysis {
     foodPrice?: number;
     historicalOrigins?: string;
     nutritionCommentary?: string;
-    analyzedAt: string;
+    dishSuggestion?: string;
+    analyzedAt?: string;
 }
 export declare class CreateMealDto {
     imageUrl: string;

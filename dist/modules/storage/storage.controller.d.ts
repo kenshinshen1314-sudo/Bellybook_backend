@@ -18,20 +18,9 @@ export declare class StorageController {
             size: number;
         };
         analysis: {
-            foodName: string;
-            cuisine: string;
-            nutrition: {
-                calories: number;
-                protein: number;
-                fat: number;
-                carbohydrates: number;
-                fiber?: number;
-                sugar?: number;
-                sodium?: number;
-            };
-            dishes?: Array<{
+            dishes: Array<{
                 foodName: string;
-                cuisine?: string;
+                cuisine: string;
                 nutrition: {
                     calories: number;
                     protein: number;
@@ -39,6 +28,12 @@ export declare class StorageController {
                     carbohydrates: number;
                 };
             }>;
+            nutrition: {
+                calories: number;
+                protein: number;
+                fat: number;
+                carbohydrates: number;
+            };
             plating?: string;
             description?: string;
             ingredients?: string[];

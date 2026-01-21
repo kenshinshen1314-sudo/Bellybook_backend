@@ -9,7 +9,7 @@ var __metadata = (this && this.__metadata) || function (k, v) {
     if (typeof Reflect === "object" && typeof Reflect.metadata === "function") return Reflect.metadata(k, v);
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.CreateMealDto = exports.MealAnalysis = exports.Ingredient = exports.Nutrition = void 0;
+exports.CreateMealDto = exports.MealAnalysis = exports.DishInfo = exports.Ingredient = exports.Nutrition = void 0;
 const class_validator_1 = require("class-validator");
 const class_transformer_1 = require("class-transformer");
 class Nutrition {
@@ -78,14 +78,31 @@ __decorate([
     (0, class_validator_1.IsString)(),
     __metadata("design:type", String)
 ], Ingredient.prototype, "description", void 0);
-class MealAnalysis {
+class DishInfo {
     foodName;
     cuisine;
+    nutrition;
+}
+exports.DishInfo = DishInfo;
+__decorate([
+    (0, class_validator_1.IsString)(),
+    __metadata("design:type", String)
+], DishInfo.prototype, "foodName", void 0);
+__decorate([
+    (0, class_validator_1.IsString)(),
+    __metadata("design:type", String)
+], DishInfo.prototype, "cuisine", void 0);
+__decorate([
+    (0, class_validator_1.ValidateNested)(),
+    __metadata("design:type", Nutrition)
+], DishInfo.prototype, "nutrition", void 0);
+class MealAnalysis {
+    dishes;
+    nutrition;
     plating;
     sensory;
     container;
     description;
-    nutrition;
     ingredients;
     suggestions;
     poeticDescription;
@@ -93,17 +110,20 @@ class MealAnalysis {
     foodPrice;
     historicalOrigins;
     nutritionCommentary;
+    dishSuggestion;
     analyzedAt;
 }
 exports.MealAnalysis = MealAnalysis;
 __decorate([
-    (0, class_validator_1.IsString)(),
-    __metadata("design:type", String)
-], MealAnalysis.prototype, "foodName", void 0);
+    (0, class_validator_1.IsArray)(),
+    (0, class_validator_1.ValidateNested)({ each: true }),
+    (0, class_transformer_1.Type)(() => DishInfo),
+    __metadata("design:type", Array)
+], MealAnalysis.prototype, "dishes", void 0);
 __decorate([
-    (0, class_validator_1.IsString)(),
-    __metadata("design:type", String)
-], MealAnalysis.prototype, "cuisine", void 0);
+    (0, class_validator_1.ValidateNested)(),
+    __metadata("design:type", Nutrition)
+], MealAnalysis.prototype, "nutrition", void 0);
 __decorate([
     (0, class_validator_1.IsOptional)(),
     (0, class_validator_1.IsString)(),
@@ -124,10 +144,6 @@ __decorate([
     (0, class_validator_1.IsString)(),
     __metadata("design:type", String)
 ], MealAnalysis.prototype, "description", void 0);
-__decorate([
-    (0, class_validator_1.ValidateNested)(),
-    __metadata("design:type", Nutrition)
-], MealAnalysis.prototype, "nutrition", void 0);
 __decorate([
     (0, class_validator_1.IsOptional)(),
     (0, class_validator_1.IsArray)(),
@@ -166,6 +182,12 @@ __decorate([
     __metadata("design:type", String)
 ], MealAnalysis.prototype, "nutritionCommentary", void 0);
 __decorate([
+    (0, class_validator_1.IsOptional)(),
+    (0, class_validator_1.IsString)(),
+    __metadata("design:type", String)
+], MealAnalysis.prototype, "dishSuggestion", void 0);
+__decorate([
+    (0, class_validator_1.IsOptional)(),
     (0, class_validator_1.IsString)(),
     __metadata("design:type", String)
 ], MealAnalysis.prototype, "analyzedAt", void 0);
