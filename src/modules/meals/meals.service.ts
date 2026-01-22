@@ -1,11 +1,11 @@
 /**
- * [INPUT]: 依赖 PrismaService 的数据库访问、DishesService 的菜品知识库操作
+ * [INPUT]: 依赖 PrismaService 的数据库访问、DishesService 的菜品知识库操作、DateUtil 的日期处理
  * [OUTPUT]: 对外提供餐食 CRUD、今日餐食、按日期查询、按菜品查询
  * [POS]: meals 模块的核心服务层，被 storage、sync 模块消费
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
-import { Prisma, Meal } from '@prisma/client';
+import { Meal, Prisma, PrismaClient } from '@prisma/client';
 import { PrismaService } from '../../database/prisma.service';
 import { CreateMealDto } from './dto/create-meal.dto';
 import { UpdateMealDto } from './dto/update-meal.dto';
@@ -13,7 +13,13 @@ import { MealResponseDto, PaginatedMealsDto } from './dto/meal-response.dto';
 import { MealQueryDto } from './dto/meal-query.dto';
 import { PaginatedResponse } from '../../common/dto/pagination.dto';
 import { DishesService } from '../dishes/dishes.service';
-import { DishInput } from '../ai/ai-types';
+import { DateUtil } from '../../common/utils/date.util';
+import {
+  AiAnalysis,
+  AiDishInfo,
+  CreateMealInput,
+  MealFilters,
+} from './meals.types';
 
 @Injectable()
 export class MealsService {
@@ -25,76 +31,97 @@ export class MealsService {
   ) {}
 
   // ============================================================
-  // Public Methods
+  // 公共方法 - 餐食 CRUD
   // ============================================================
 
   /**
-   * 创建餐食记录
+   * 创建餐食记录（带事务）
    *
    * 流程：
    * 1. 从 AI 分析结果中提取第一个菜品信息
    * 2. 更新菜品知识库（加权平均统计）
    * 3. 创建餐食记录
    * 4. 更新菜系解锁、每日营养、菜品解锁
+   *
+   * 所有步骤在单个事务中完成，确保数据一致性
    */
   async create(userId: string, dto: CreateMealDto): Promise<MealResponseDto> {
     const firstDish = this.extractFirstDish(dto.analysis);
 
-    // 更新菜品知识库
-    const dish = await this.dishesService.findOrCreateAndUpdate({
-      foodName: firstDish.foodName,
-      cuisine: firstDish.cuisine,
-      nutrition: {
-        calories: dto.analysis.nutrition.calories,
-        protein: dto.analysis.nutrition.protein,
-        fat: dto.analysis.nutrition.fat,
-        carbohydrates: dto.analysis.nutrition.carbohydrates,
+    // 使用事务确保数据一致性
+    const result = await this.prisma.runTransaction(
+      async (tx) => {
+        // 1. 更新菜品知识库
+        const dish = await this.dishesService.findOrCreateAndUpdateInTx(
+          tx,
+          {
+            foodName: firstDish.foodName,
+            cuisine: firstDish.cuisine,
+            nutrition: {
+              calories: dto.analysis.nutrition.calories,
+              protein: dto.analysis.nutrition.protein,
+              fat: dto.analysis.nutrition.fat,
+              carbohydrates: dto.analysis.nutrition.carbohydrates,
+            },
+            price: dto.analysis.foodPrice,
+            description: dto.analysis.description,
+            historicalOrigins: dto.analysis.historicalOrigins,
+          },
+        );
+
+        // 2. 创建餐食记录
+        const meal = await tx.meal.create({
+          data: {
+            userId,
+            imageUrl: dto.imageUrl,
+            thumbnailUrl: dto.thumbnailUrl,
+            analysis: this.toPrismaJson(dto.analysis),
+            foodName: firstDish.foodName,
+            cuisine: firstDish.cuisine,
+            mealType: dto.mealType || 'SNACK',
+            notes: dto.notes,
+            calories: dto.analysis.nutrition.calories,
+            protein: dto.analysis.nutrition.protein,
+            fat: dto.analysis.nutrition.fat,
+            carbohydrates: dto.analysis.nutrition.carbohydrates,
+            price: dto.analysis.foodPrice,
+            dishId: dish.id,
+            searchText: this.buildSearchText(
+              firstDish.foodName,
+              firstDish.cuisine,
+              dto.notes,
+            ),
+            analyzedAt: new Date(),
+          },
+        });
+
+        // 3. 更新统计数据（同一事务）
+        await Promise.all([
+          this.updateCuisineUnlockInTx(tx, userId, firstDish.cuisine),
+          this.updateDailyNutritionInTx(tx, userId, meal),
+          this.updateDishUnlockInTx(tx, userId, firstDish.foodName),
+        ]);
+
+        return { meal, dish };
       },
-      price: dto.analysis.foodPrice,
-      description: dto.analysis.description,
-      historicalOrigins: dto.analysis.historicalOrigins,
-    });
-
-    // 创建餐食记录
-    const meal = await this.prisma.meal.create({
-      data: {
-        userId,
-        imageUrl: dto.imageUrl,
-        thumbnailUrl: dto.thumbnailUrl,
-        analysis: this.toPrismaJson(dto.analysis),
-        foodName: firstDish.foodName,
-        cuisine: firstDish.cuisine,
-        mealType: dto.mealType || 'SNACK',
-        notes: dto.notes,
-        calories: dto.analysis.nutrition.calories,
-        protein: dto.analysis.nutrition.protein,
-        fat: dto.analysis.nutrition.fat,
-        carbohydrates: dto.analysis.nutrition.carbohydrates,
-        price: dto.analysis.foodPrice,
-        dishId: dish.id,
-        searchText: this.buildSearchText(firstDish.foodName, firstDish.cuisine, dto.notes),
-        analyzedAt: new Date(),
+      {
+        maxWait: 5000,
+        timeout: 10000,
       },
-    });
+    );
 
-    // 更新统计数据（并行执行，失败不影响主流程）
-    await Promise.allSettled([
-      this.updateCuisineUnlock(userId, firstDish.cuisine),
-      this.updateDailyNutrition(userId, meal),
-      this.updateDishUnlock(userId, firstDish.foodName),
-    ]);
+    this.logger.log(`Meal created: ${result.meal.id} for user: ${userId}`);
 
-    return this.mapToMealResponse(meal);
+    return this.mapToMealResponse(result.meal);
   }
 
   /**
    * 创建待分析的餐食记录（占位符）
    */
-  async createPending(userId: string, dto: {
-    imageUrl: string;
-    thumbnailUrl?: string;
-    mealType?: string;
-  }): Promise<MealResponseDto> {
+  async createPending(
+    userId: string,
+    dto: CreateMealDto,
+  ): Promise<MealResponseDto> {
     const meal = await this.prisma.meal.create({
       data: {
         userId,
@@ -106,7 +133,7 @@ export class MealsService {
         }),
         foodName: '分析中...',
         cuisine: '待定',
-        mealType: (dto.mealType || 'SNACK') as any,
+        mealType: dto.mealType || 'SNACK',
         searchText: 'analyzing pending',
       },
     });
@@ -117,76 +144,87 @@ export class MealsService {
   /**
    * 用 AI 分析结果更新餐食记录
    */
-  async updateWithAnalysis(mealId: string, data: {
-    analysis: any;
-    calories: number;
-    protein: number;
-    fat: number;
-    carbohydrates: number;
-    price?: number;
-    foodName: string;
-    cuisine: string;
-    description?: string;
-    historicalOrigins?: string;
-  }): Promise<MealResponseDto> {
-    const meal = await this.prisma.meal.findUnique({
-      where: { id: mealId },
-    });
+  async updateWithAnalysis(
+    mealId: string,
+    data: {
+      analysis: AiAnalysis;
+      calories: number;
+      protein: number;
+      fat: number;
+      carbohydrates: number;
+      price?: number;
+      foodName: string;
+      cuisine: string;
+      description?: string;
+      historicalOrigins?: string;
+    },
+  ): Promise<MealResponseDto> {
+    // 使用事务确保数据一致性
+    const result = await this.prisma.runTransaction(async (tx) => {
+      // 1. 检查餐食是否存在
+      const meal = await tx.meal.findUnique({
+        where: { id: mealId },
+      });
 
-    if (!meal) {
-      throw new NotFoundException('Meal not found');
-    }
+      if (!meal) {
+        throw new NotFoundException('Meal not found');
+      }
 
-    // 更新菜品知识库
-    const dish = await this.dishesService.findOrCreateAndUpdate({
-      foodName: data.foodName,
-      cuisine: data.cuisine,
-      nutrition: {
-        calories: data.calories,
-        protein: data.protein,
-        fat: data.fat,
-        carbohydrates: data.carbohydrates,
-      },
-      price: data.price,
-      description: data.description,
-      historicalOrigins: data.historicalOrigins,
-    });
-
-    // 更新餐食记录
-    const updatedMeal = await this.prisma.meal.update({
-      where: { id: mealId },
-      data: {
-        analysis: this.toPrismaJson(data.analysis),
+      // 2. 更新菜品知识库
+      const dish = await this.dishesService.findOrCreateAndUpdateInTx(tx, {
         foodName: data.foodName,
         cuisine: data.cuisine,
-        calories: data.calories,
-        protein: data.protein,
-        fat: data.fat,
-        carbohydrates: data.carbohydrates,
+        nutrition: {
+          calories: data.calories,
+          protein: data.protein,
+          fat: data.fat,
+          carbohydrates: data.carbohydrates,
+        },
         price: data.price,
-        dishId: dish.id,
-        searchText: this.buildSearchText(data.foodName, data.cuisine),
-        analyzedAt: new Date(),
-      },
+        description: data.description,
+        historicalOrigins: data.historicalOrigins,
+      });
+
+      // 3. 更新餐食记录
+      const updatedMeal = await tx.meal.update({
+        where: { id: mealId },
+        data: {
+          analysis: this.toPrismaJson(data.analysis),
+          foodName: data.foodName,
+          cuisine: data.cuisine,
+          calories: data.calories,
+          protein: data.protein,
+          fat: data.fat,
+          carbohydrates: data.carbohydrates,
+          price: data.price,
+          dishId: dish.id,
+          searchText: this.buildSearchText(data.foodName, data.cuisine),
+          analyzedAt: new Date(),
+        },
+      });
+
+      // 4. 更新统计数据
+      await Promise.all([
+        this.updateCuisineUnlockInTx(tx, meal.userId, data.cuisine),
+        this.updateDailyNutritionInTx(tx, meal.userId, updatedMeal),
+        this.updateDishUnlockInTx(tx, meal.userId, data.foodName),
+      ]);
+
+      return updatedMeal;
     });
 
-    // 更新统计数据
-    await Promise.allSettled([
-      this.updateCuisineUnlock(meal.userId, data.cuisine),
-      this.updateDailyNutrition(meal.userId, updatedMeal),
-      this.updateDishUnlock(meal.userId, data.foodName),
-    ]);
+    this.logger.log(`Meal updated with analysis: ${mealId}`);
 
-    return this.mapToMealResponse(updatedMeal);
+    return this.mapToMealResponse(result);
   }
 
   /**
    * 标记分析失败
    */
-  async markAnalysisFailed(mealId: string, errorData: {
-    error: string;
-    status: string;
-  }): Promise<MealResponseDto> {
+  async markAnalysisFailed(
+    mealId: string,
+    errorData: { error: string; status: string },
+  ): Promise<MealResponseDto> {
     const updatedMeal = await this.prisma.meal.update({
       where: { id: mealId },
       data: {
@@ -206,7 +244,10 @@ export class MealsService {
   /**
    * 查询用户的餐食列表（分页）
    */
-  async findAll(userId: string, query: MealQueryDto): Promise<PaginatedMealsDto> {
+  async findAll(
+    userId: string,
+    query: MealQueryDto,
+  ): Promise<PaginatedMealsDto> {
     const { page = 1, limit = 20, offset, mealType, startDate, endDate, cuisine, sortBy, sortOrder } = query;
     const skip = offset ?? (page - 1) * limit;
 
@@ -219,7 +260,7 @@ export class MealsService {
     ]);
 
     return new PaginatedResponse(
-      meals.map(m => this.mapToMealResponse(m)),
+      meals.map((m) => this.mapToMealResponse(m)),
       total,
       page,
       limit,
@@ -244,7 +285,11 @@ export class MealsService {
   /**
    * 更新餐食
    */
-  async update(userId: string, id: string, dto: UpdateMealDto): Promise<MealResponseDto> {
+  async update(
+    userId: string,
+    id: string,
+    dto: UpdateMealDto,
+  ): Promise<MealResponseDto> {
     const meal = await this.prisma.meal.findFirst({
       where: { id, userId, deletedAt: null },
     });
@@ -280,15 +325,19 @@ export class MealsService {
       where: { id },
       data: { deletedAt: new Date() },
     });
+
+    this.logger.log(`Meal deleted: ${id} by user: ${userId}`);
   }
+
+  // ============================================================
+  // 公共方法 - 按日期/菜品查询
+  // ============================================================
 
   /**
    * 获取今日餐食
    */
   async getToday(userId: string): Promise<MealResponseDto[]> {
-    const today = this.getStartOfDay();
-    const tomorrow = new Date(today);
-    tomorrow.setDate(tomorrow.getDate() + 1);
+    const [today, tomorrow] = DateUtil.dayRange();
 
     const meals = await this.prisma.meal.findMany({
       where: {
@@ -299,16 +348,14 @@ export class MealsService {
       orderBy: { createdAt: 'desc' },
     });
 
-    return meals.map(m => this.mapToMealResponse(m));
+    return meals.map((m) => this.mapToMealResponse(m));
   }
 
   /**
    * 获取指定日期的餐食
    */
   async getByDate(userId: string, date: Date): Promise<MealResponseDto[]> {
-    const startOfDay = this.getStartOfDay(date);
-    const endOfDay = new Date(startOfDay);
-    endOfDay.setDate(endOfDay.getDate() + 1);
+    const [startOfDay, endOfDay] = DateUtil.dayRange(date);
 
     const meals = await this.prisma.meal.findMany({
       where: {
@@ -319,7 +366,7 @@ export class MealsService {
       orderBy: { createdAt: 'desc' },
     });
 
-    return meals.map(m => this.mapToMealResponse(m));
+    return meals.map((m) => this.mapToMealResponse(m));
   }
 
   /**
@@ -348,44 +395,50 @@ export class MealsService {
     ]);
 
     return {
-      meals: meals.map(m => this.mapToMealResponse(m)),
-      dish: dish ? {
-        name: dish.name,
-        cuisine: dish.cuisine,
-        appearanceCount: dish.appearanceCount,
-        averageCalories: dish.averageCalories,
-        averageProtein: dish.averageProtein,
-        averageFat: dish.averageFat,
-        averageCarbs: dish.averageCarbs,
-        description: dish.description,
-        historicalOrigins: dish.historicalOrigins,
-      } : null,
+      meals: meals.map((m) => this.mapToMealResponse(m)),
+      dish: dish
+        ? {
+            name: dish.name,
+            cuisine: dish.cuisine,
+            appearanceCount: dish.appearanceCount,
+            averageCalories: dish.averageCalories,
+            averageProtein: dish.averageProtein,
+            averageFat: dish.averageFat,
+            averageCarbs: dish.averageCarbs,
+            description: dish.description,
+            historicalOrigins: dish.historicalOrigins,
+          }
+        : null,
     };
   }
 
   // ============================================================
-  // Private Methods - Statistics Updates
+  // 私有方法 - 统计更新（事务内）
   // ============================================================
 
   /**
-   * 更新菜系解锁记录
+   * 更新菜系解锁记录（事务内）
    */
-  private async updateCuisineUnlock(userId: string, cuisineName: string): Promise<void> {
-    const existing = await this.prisma.cuisine_unlocks.findUnique({
+  private async updateCuisineUnlockInTx(
+    tx: Omit<PrismaClient, '$connect' | '$disconnect' | '$on' | '$transaction' | '$use' | '$extends'>,
+    userId: string,
+    cuisineName: string,
+  ): Promise<void> {
+    const existing = await tx.cuisine_unlocks.findUnique({
       where: { userId_cuisineName: { userId, cuisineName } },
     });
 
     if (existing) {
-      await this.prisma.cuisine_unlocks.update({
+      await tx.cuisine_unlocks.update({
         where: { id: existing.id },
         data: { mealCount: { increment: 1 }, lastMealAt: new Date() },
       });
     } else {
-      const config = await this.prisma.cuisine_configs.findUnique({
+      const config = await tx.cuisine_configs.findUnique({
         where: { name: cuisineName },
       });
 
-      await this.prisma.cuisine_unlocks.create({
+      await tx.cuisine_unlocks.create({
         data: {
           userId,
           cuisineName,
@@ -400,16 +453,28 @@ export class MealsService {
   }
 
   /**
-   * 更新每日营养统计
+   * 更新每日营养统计（事务内）
    */
-  private async updateDailyNutrition(userId: string, meal: Meal): Promise<void> {
-    const mealDate = this.getStartOfDay(meal.createdAt);
+  private async updateDailyNutritionInTx(
+    tx: Omit<PrismaClient, '$connect' | '$disconnect' | '$on' | '$transaction' | '$use' | '$extends'>,
+    userId: string,
+    meal: Meal,
+  ): Promise<void> {
+    const mealDate = DateUtil.startOfDay(meal.createdAt);
 
     // 从 JSON 提取营养数据
-    const analysis = meal.analysis as unknown as { nutrition?: Record<string, number | undefined> };
-    const nutrition = analysis?.nutrition || {};
+    const analysis = meal.analysis as unknown as AiAnalysis;
+    const nutrition = analysis?.nutrition || {
+      calories: meal.calories || 0,
+      protein: meal.protein || 0,
+      fat: meal.fat || 0,
+      carbohydrates: meal.carbohydrates || 0,
+      fiber: 0,
+      sugar: 0,
+      sodium: 0,
+    };
 
-    const existing = await this.prisma.daily_nutritions.findUnique({
+    const existing = await tx.daily_nutritions.findUnique({
       where: { userId_date: { userId, date: mealDate } },
     });
 
@@ -429,12 +494,12 @@ export class MealsService {
     };
 
     if (existing) {
-      await this.prisma.daily_nutritions.update({
+      await tx.daily_nutritions.update({
         where: { id: existing.id },
         data: incrementData,
       });
     } else {
-      await this.prisma.daily_nutritions.create({
+      await tx.daily_nutritions.create({
         data: {
           userId,
           date: mealDate,
@@ -445,20 +510,24 @@ export class MealsService {
   }
 
   /**
-   * 更新菜品解锁记录
+   * 更新菜品解锁记录（事务内）
    */
-  private async updateDishUnlock(userId: string, dishName: string): Promise<void> {
-    const existing = await this.prisma.dish_unlocks.findUnique({
+  private async updateDishUnlockInTx(
+    tx: Omit<PrismaClient, '$connect' | '$disconnect' | '$on' | '$transaction' | '$use' | '$extends'>,
+    userId: string,
+    dishName: string,
+  ): Promise<void> {
+    const existing = await tx.dish_unlocks.findUnique({
       where: { userId_dishName: { userId, dishName } },
     });
 
     if (existing) {
-      await this.prisma.dish_unlocks.update({
+      await tx.dish_unlocks.update({
         where: { id: existing.id },
         data: { mealCount: { increment: 1 }, lastMealAt: new Date() },
       });
     } else {
-      await this.prisma.dish_unlocks.create({
+      await tx.dish_unlocks.create({
         data: {
           userId,
           dishName,
@@ -471,25 +540,24 @@ export class MealsService {
   }
 
   // ============================================================
-  // Private Methods - Helpers
+  // 私有方法 - 辅助函数
   // ============================================================
 
   /**
    * 从 AI 分析结果中提取第一个菜品信息
    */
-  private extractFirstDish(analysis: any): { foodName: string; cuisine: string } {
+  private extractFirstDish(analysis: AiAnalysis): AiDishInfo {
     const firstDish = analysis.dishes?.[0];
     if (!firstDish) {
       throw new Error('Invalid AI response: no dishes found');
     }
-    return { foodName: firstDish.foodName, cuisine: firstDish.cuisine };
+    return firstDish;
   }
 
   /**
    * 将对象转换为 Prisma.InputJsonValue
-   * 显式转换，消除 as any
    */
-  private toPrismaJson(value: any): Prisma.InputJsonValue {
+  private toPrismaJson<T>(value: T): Prisma.InputJsonValue {
     try {
       return JSON.parse(JSON.stringify(value));
     } catch (error) {
@@ -501,17 +569,12 @@ export class MealsService {
   /**
    * 构建搜索文本
    */
-  private buildSearchText(foodName: string, cuisine: string, notes?: string): string {
+  private buildSearchText(
+    foodName: string,
+    cuisine: string,
+    notes?: string,
+  ): string {
     return `${foodName} ${cuisine} ${notes || ''}`.toLowerCase().trim();
-  }
-
-  /**
-   * 获取一天的开始时间（00:00:00）
-   */
-  private getStartOfDay(date?: Date): Date {
-    const d = date ? new Date(date) : new Date();
-    d.setHours(0, 0, 0, 0);
-    return d;
   }
 
   /**
@@ -519,7 +582,7 @@ export class MealsService {
    */
   private buildWhereClause(
     userId: string,
-    filters: { mealType?: string; startDate?: string; endDate?: string; cuisine?: string },
+    filters: MealFilters,
   ): Prisma.MealWhereInput {
     const where: Prisma.MealWhereInput = {
       userId,
@@ -527,7 +590,8 @@ export class MealsService {
     };
 
     if (filters.mealType) {
-      where.mealType = filters.mealType as 'BREAKFAST' | 'LUNCH' | 'DINNER' | 'SNACK';
+      where.mealType =
+        filters.mealType as 'BREAKFAST' | 'LUNCH' | 'DINNER' | 'SNACK';
     }
 
     if (filters.startDate || filters.endDate) {
@@ -546,7 +610,10 @@ export class MealsService {
   /**
    * 构建排序条件
    */
-  private buildOrderByClause(sortBy?: string, sortOrder?: 'asc' | 'desc'): Prisma.MealOrderByWithRelationInput {
+  private buildOrderByClause(
+    sortBy?: string,
+    sortOrder?: 'asc' | 'desc',
+  ): Prisma.MealOrderByWithRelationInput {
     if (sortBy) {
       return { [sortBy]: sortOrder || 'desc' };
     }
@@ -562,7 +629,7 @@ export class MealsService {
       userId: meal.userId,
       imageUrl: meal.imageUrl,
       thumbnailUrl: meal.thumbnailUrl ?? undefined,
-      analysis: meal.analysis as any,
+      analysis: meal.analysis as any, // Prisma Json 类型
       mealType: meal.mealType,
       notes: meal.notes ?? undefined,
       createdAt: meal.createdAt,

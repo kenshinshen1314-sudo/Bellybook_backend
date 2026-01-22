@@ -7,6 +7,7 @@ import { AuthResponseDto, UserResponseDto } from './dto/auth-response.dto';
 export declare class AuthService {
     private prisma;
     private jwtService;
+    private readonly logger;
     constructor(prisma: PrismaService, jwtService: JwtService);
     register(dto: RegisterDto): Promise<AuthResponseDto>;
     login(dto: LoginDto): Promise<AuthResponseDto>;
@@ -16,5 +17,6 @@ export declare class AuthService {
     private generateTokens;
     private storeRefreshToken;
     private parseExpiration;
+    private calculateExpiration;
     private mapToUserResponse;
 }

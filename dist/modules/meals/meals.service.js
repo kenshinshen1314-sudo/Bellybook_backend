@@ -15,6 +15,7 @@ const common_1 = require("@nestjs/common");
 const prisma_service_1 = require("../../database/prisma.service");
 const pagination_dto_1 = require("../../common/dto/pagination.dto");
 const dishes_service_1 = require("../dishes/dishes.service");
+const date_util_1 = require("../../common/utils/date.util");
 let MealsService = MealsService_1 = class MealsService {
     prisma;
     dishesService;
@@ -25,45 +26,52 @@ let MealsService = MealsService_1 = class MealsService {
     }
     async create(userId, dto) {
         const firstDish = this.extractFirstDish(dto.analysis);
-        const dish = await this.dishesService.findOrCreateAndUpdate({
-            foodName: firstDish.foodName,
-            cuisine: firstDish.cuisine,
-            nutrition: {
-                calories: dto.analysis.nutrition.calories,
-                protein: dto.analysis.nutrition.protein,
-                fat: dto.analysis.nutrition.fat,
-                carbohydrates: dto.analysis.nutrition.carbohydrates,
-            },
-            price: dto.analysis.foodPrice,
-            description: dto.analysis.description,
-            historicalOrigins: dto.analysis.historicalOrigins,
-        });
-        const meal = await this.prisma.meal.create({
-            data: {
-                userId,
-                imageUrl: dto.imageUrl,
-                thumbnailUrl: dto.thumbnailUrl,
-                analysis: this.toPrismaJson(dto.analysis),
+        const result = await this.prisma.runTransaction(async (tx) => {
+            const dish = await this.dishesService.findOrCreateAndUpdateInTx(tx, {
                 foodName: firstDish.foodName,
                 cuisine: firstDish.cuisine,
-                mealType: dto.mealType || 'SNACK',
-                notes: dto.notes,
-                calories: dto.analysis.nutrition.calories,
-                protein: dto.analysis.nutrition.protein,
-                fat: dto.analysis.nutrition.fat,
-                carbohydrates: dto.analysis.nutrition.carbohydrates,
+                nutrition: {
+                    calories: dto.analysis.nutrition.calories,
+                    protein: dto.analysis.nutrition.protein,
+                    fat: dto.analysis.nutrition.fat,
+                    carbohydrates: dto.analysis.nutrition.carbohydrates,
+                },
                 price: dto.analysis.foodPrice,
-                dishId: dish.id,
-                searchText: this.buildSearchText(firstDish.foodName, firstDish.cuisine, dto.notes),
-                analyzedAt: new Date(),
-            },
+                description: dto.analysis.description,
+                historicalOrigins: dto.analysis.historicalOrigins,
+            });
+            const meal = await tx.meal.create({
+                data: {
+                    userId,
+                    imageUrl: dto.imageUrl,
+                    thumbnailUrl: dto.thumbnailUrl,
+                    analysis: this.toPrismaJson(dto.analysis),
+                    foodName: firstDish.foodName,
+                    cuisine: firstDish.cuisine,
+                    mealType: dto.mealType || 'SNACK',
+                    notes: dto.notes,
+                    calories: dto.analysis.nutrition.calories,
+                    protein: dto.analysis.nutrition.protein,
+                    fat: dto.analysis.nutrition.fat,
+                    carbohydrates: dto.analysis.nutrition.carbohydrates,
+                    price: dto.analysis.foodPrice,
+                    dishId: dish.id,
+                    searchText: this.buildSearchText(firstDish.foodName, firstDish.cuisine, dto.notes),
+                    analyzedAt: new Date(),
+                },
+            });
+            await Promise.all([
+                this.updateCuisineUnlockInTx(tx, userId, firstDish.cuisine),
+                this.updateDailyNutritionInTx(tx, userId, meal),
+                this.updateDishUnlockInTx(tx, userId, firstDish.foodName),
+            ]);
+            return { meal, dish };
+        }, {
+            maxWait: 5000,
+            timeout: 10000,
         });
-        await Promise.allSettled([
-            this.updateCuisineUnlock(userId, firstDish.cuisine),
-            this.updateDailyNutrition(userId, meal),
-            this.updateDishUnlock(userId, firstDish.foodName),
-        ]);
-        return this.mapToMealResponse(meal);
+        this.logger.log(`Meal created: ${result.meal.id} for user: ${userId}`);
+        return this.mapToMealResponse(result.meal);
     }
     async createPending(userId, dto) {
         const meal = await this.prisma.meal.create({
@@ -77,54 +85,58 @@ let MealsService = MealsService_1 = class MealsService {
                 }),
                 foodName: '分析中...',
                 cuisine: '待定',
-                mealType: (dto.mealType || 'SNACK'),
+                mealType: dto.mealType || 'SNACK',
                 searchText: 'analyzing pending',
             },
         });
         return this.mapToMealResponse(meal);
     }
     async updateWithAnalysis(mealId, data) {
-        const meal = await this.prisma.meal.findUnique({
-            where: { id: mealId },
-        });
-        if (!meal) {
-            throw new common_1.NotFoundException('Meal not found');
-        }
-        const dish = await this.dishesService.findOrCreateAndUpdate({
-            foodName: data.foodName,
-            cuisine: data.cuisine,
-            nutrition: {
-                calories: data.calories,
-                protein: data.protein,
-                fat: data.fat,
-                carbohydrates: data.carbohydrates,
-            },
-            price: data.price,
-            description: data.description,
-            historicalOrigins: data.historicalOrigins,
-        });
-        const updatedMeal = await this.prisma.meal.update({
-            where: { id: mealId },
-            data: {
-                analysis: this.toPrismaJson(data.analysis),
+        const result = await this.prisma.runTransaction(async (tx) => {
+            const meal = await tx.meal.findUnique({
+                where: { id: mealId },
+            });
+            if (!meal) {
+                throw new common_1.NotFoundException('Meal not found');
+            }
+            const dish = await this.dishesService.findOrCreateAndUpdateInTx(tx, {
                 foodName: data.foodName,
                 cuisine: data.cuisine,
-                calories: data.calories,
-                protein: data.protein,
-                fat: data.fat,
-                carbohydrates: data.carbohydrates,
+                nutrition: {
+                    calories: data.calories,
+                    protein: data.protein,
+                    fat: data.fat,
+                    carbohydrates: data.carbohydrates,
+                },
                 price: data.price,
-                dishId: dish.id,
-                searchText: this.buildSearchText(data.foodName, data.cuisine),
-                analyzedAt: new Date(),
-            },
+                description: data.description,
+                historicalOrigins: data.historicalOrigins,
+            });
+            const updatedMeal = await tx.meal.update({
+                where: { id: mealId },
+                data: {
+                    analysis: this.toPrismaJson(data.analysis),
+                    foodName: data.foodName,
+                    cuisine: data.cuisine,
+                    calories: data.calories,
+                    protein: data.protein,
+                    fat: data.fat,
+                    carbohydrates: data.carbohydrates,
+                    price: data.price,
+                    dishId: dish.id,
+                    searchText: this.buildSearchText(data.foodName, data.cuisine),
+                    analyzedAt: new Date(),
+                },
+            });
+            await Promise.all([
+                this.updateCuisineUnlockInTx(tx, meal.userId, data.cuisine),
+                this.updateDailyNutritionInTx(tx, meal.userId, updatedMeal),
+                this.updateDishUnlockInTx(tx, meal.userId, data.foodName),
+            ]);
+            return updatedMeal;
         });
-        await Promise.allSettled([
-            this.updateCuisineUnlock(meal.userId, data.cuisine),
-            this.updateDailyNutrition(meal.userId, updatedMeal),
-            this.updateDishUnlock(meal.userId, data.foodName),
-        ]);
-        return this.mapToMealResponse(updatedMeal);
+        this.logger.log(`Meal updated with analysis: ${mealId}`);
+        return this.mapToMealResponse(result);
     }
     async markAnalysisFailed(mealId, errorData) {
         const updatedMeal = await this.prisma.meal.update({
@@ -150,7 +162,7 @@ let MealsService = MealsService_1 = class MealsService {
             this.prisma.meal.findMany({ where, orderBy, skip, take: limit }),
             this.prisma.meal.count({ where }),
         ]);
-        return new pagination_dto_1.PaginatedResponse(meals.map(m => this.mapToMealResponse(m)), total, page, limit);
+        return new pagination_dto_1.PaginatedResponse(meals.map((m) => this.mapToMealResponse(m)), total, page, limit);
     }
     async findOne(userId, id) {
         const meal = await this.prisma.meal.findFirst({
@@ -188,11 +200,10 @@ let MealsService = MealsService_1 = class MealsService {
             where: { id },
             data: { deletedAt: new Date() },
         });
+        this.logger.log(`Meal deleted: ${id} by user: ${userId}`);
     }
     async getToday(userId) {
-        const today = this.getStartOfDay();
-        const tomorrow = new Date(today);
-        tomorrow.setDate(tomorrow.getDate() + 1);
+        const [today, tomorrow] = date_util_1.DateUtil.dayRange();
         const meals = await this.prisma.meal.findMany({
             where: {
                 userId,
@@ -201,12 +212,10 @@ let MealsService = MealsService_1 = class MealsService {
             },
             orderBy: { createdAt: 'desc' },
         });
-        return meals.map(m => this.mapToMealResponse(m));
+        return meals.map((m) => this.mapToMealResponse(m));
     }
     async getByDate(userId, date) {
-        const startOfDay = this.getStartOfDay(date);
-        const endOfDay = new Date(startOfDay);
-        endOfDay.setDate(endOfDay.getDate() + 1);
+        const [startOfDay, endOfDay] = date_util_1.DateUtil.dayRange(date);
         const meals = await this.prisma.meal.findMany({
             where: {
                 userId,
@@ -215,7 +224,7 @@ let MealsService = MealsService_1 = class MealsService {
             },
             orderBy: { createdAt: 'desc' },
         });
-        return meals.map(m => this.mapToMealResponse(m));
+        return meals.map((m) => this.mapToMealResponse(m));
     }
     async getByDishName(userId, foodName) {
         const [meals, dish] = await Promise.all([
@@ -226,35 +235,37 @@ let MealsService = MealsService_1 = class MealsService {
             this.prisma.dish.findUnique({ where: { name: foodName } }),
         ]);
         return {
-            meals: meals.map(m => this.mapToMealResponse(m)),
-            dish: dish ? {
-                name: dish.name,
-                cuisine: dish.cuisine,
-                appearanceCount: dish.appearanceCount,
-                averageCalories: dish.averageCalories,
-                averageProtein: dish.averageProtein,
-                averageFat: dish.averageFat,
-                averageCarbs: dish.averageCarbs,
-                description: dish.description,
-                historicalOrigins: dish.historicalOrigins,
-            } : null,
+            meals: meals.map((m) => this.mapToMealResponse(m)),
+            dish: dish
+                ? {
+                    name: dish.name,
+                    cuisine: dish.cuisine,
+                    appearanceCount: dish.appearanceCount,
+                    averageCalories: dish.averageCalories,
+                    averageProtein: dish.averageProtein,
+                    averageFat: dish.averageFat,
+                    averageCarbs: dish.averageCarbs,
+                    description: dish.description,
+                    historicalOrigins: dish.historicalOrigins,
+                }
+                : null,
         };
     }
-    async updateCuisineUnlock(userId, cuisineName) {
-        const existing = await this.prisma.cuisine_unlocks.findUnique({
+    async updateCuisineUnlockInTx(tx, userId, cuisineName) {
+        const existing = await tx.cuisine_unlocks.findUnique({
             where: { userId_cuisineName: { userId, cuisineName } },
         });
         if (existing) {
-            await this.prisma.cuisine_unlocks.update({
+            await tx.cuisine_unlocks.update({
                 where: { id: existing.id },
                 data: { mealCount: { increment: 1 }, lastMealAt: new Date() },
             });
         }
         else {
-            const config = await this.prisma.cuisine_configs.findUnique({
+            const config = await tx.cuisine_configs.findUnique({
                 where: { name: cuisineName },
             });
-            await this.prisma.cuisine_unlocks.create({
+            await tx.cuisine_unlocks.create({
                 data: {
                     userId,
                     cuisineName,
@@ -267,11 +278,19 @@ let MealsService = MealsService_1 = class MealsService {
             });
         }
     }
-    async updateDailyNutrition(userId, meal) {
-        const mealDate = this.getStartOfDay(meal.createdAt);
+    async updateDailyNutritionInTx(tx, userId, meal) {
+        const mealDate = date_util_1.DateUtil.startOfDay(meal.createdAt);
         const analysis = meal.analysis;
-        const nutrition = analysis?.nutrition || {};
-        const existing = await this.prisma.daily_nutritions.findUnique({
+        const nutrition = analysis?.nutrition || {
+            calories: meal.calories || 0,
+            protein: meal.protein || 0,
+            fat: meal.fat || 0,
+            carbohydrates: meal.carbohydrates || 0,
+            fiber: 0,
+            sugar: 0,
+            sodium: 0,
+        };
+        const existing = await tx.daily_nutritions.findUnique({
             where: { userId_date: { userId, date: mealDate } },
         });
         const incrementData = {
@@ -289,13 +308,13 @@ let MealsService = MealsService_1 = class MealsService {
             snackCount: meal.mealType === 'SNACK' ? 1 : 0,
         };
         if (existing) {
-            await this.prisma.daily_nutritions.update({
+            await tx.daily_nutritions.update({
                 where: { id: existing.id },
                 data: incrementData,
             });
         }
         else {
-            await this.prisma.daily_nutritions.create({
+            await tx.daily_nutritions.create({
                 data: {
                     userId,
                     date: mealDate,
@@ -304,18 +323,18 @@ let MealsService = MealsService_1 = class MealsService {
             });
         }
     }
-    async updateDishUnlock(userId, dishName) {
-        const existing = await this.prisma.dish_unlocks.findUnique({
+    async updateDishUnlockInTx(tx, userId, dishName) {
+        const existing = await tx.dish_unlocks.findUnique({
             where: { userId_dishName: { userId, dishName } },
         });
         if (existing) {
-            await this.prisma.dish_unlocks.update({
+            await tx.dish_unlocks.update({
                 where: { id: existing.id },
                 data: { mealCount: { increment: 1 }, lastMealAt: new Date() },
             });
         }
         else {
-            await this.prisma.dish_unlocks.create({
+            await tx.dish_unlocks.create({
                 data: {
                     userId,
                     dishName,
@@ -331,7 +350,7 @@ let MealsService = MealsService_1 = class MealsService {
         if (!firstDish) {
             throw new Error('Invalid AI response: no dishes found');
         }
-        return { foodName: firstDish.foodName, cuisine: firstDish.cuisine };
+        return firstDish;
     }
     toPrismaJson(value) {
         try {
@@ -345,18 +364,14 @@ let MealsService = MealsService_1 = class MealsService {
     buildSearchText(foodName, cuisine, notes) {
         return `${foodName} ${cuisine} ${notes || ''}`.toLowerCase().trim();
     }
-    getStartOfDay(date) {
-        const d = date ? new Date(date) : new Date();
-        d.setHours(0, 0, 0, 0);
-        return d;
-    }
     buildWhereClause(userId, filters) {
         const where = {
             userId,
             deletedAt: null,
         };
         if (filters.mealType) {
-            where.mealType = filters.mealType;
+            where.mealType =
+                filters.mealType;
         }
         if (filters.startDate || filters.endDate) {
             where.createdAt = {};

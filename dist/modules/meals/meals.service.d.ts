@@ -4,19 +4,16 @@ import { UpdateMealDto } from './dto/update-meal.dto';
 import { MealResponseDto, PaginatedMealsDto } from './dto/meal-response.dto';
 import { MealQueryDto } from './dto/meal-query.dto';
 import { DishesService } from '../dishes/dishes.service';
+import { AiAnalysis } from './meals.types';
 export declare class MealsService {
     private prisma;
     private dishesService;
     private readonly logger;
     constructor(prisma: PrismaService, dishesService: DishesService);
     create(userId: string, dto: CreateMealDto): Promise<MealResponseDto>;
-    createPending(userId: string, dto: {
-        imageUrl: string;
-        thumbnailUrl?: string;
-        mealType?: string;
-    }): Promise<MealResponseDto>;
+    createPending(userId: string, dto: CreateMealDto): Promise<MealResponseDto>;
     updateWithAnalysis(mealId: string, data: {
-        analysis: any;
+        analysis: AiAnalysis;
         calories: number;
         protein: number;
         fat: number;
@@ -51,13 +48,12 @@ export declare class MealsService {
             historicalOrigins: string | null;
         } | null;
     }>;
-    private updateCuisineUnlock;
-    private updateDailyNutrition;
-    private updateDishUnlock;
+    private updateCuisineUnlockInTx;
+    private updateDailyNutritionInTx;
+    private updateDishUnlockInTx;
     private extractFirstDish;
     private toPrismaJson;
     private buildSearchText;
-    private getStartOfDay;
     private buildWhereClause;
     private buildOrderByClause;
     private mapToMealResponse;

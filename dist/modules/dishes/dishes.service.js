@@ -20,15 +20,32 @@ let DishesService = DishesService_1 = class DishesService {
         this.prisma = prisma;
     }
     async findOrCreateAndUpdate(input) {
+        return this.prisma.runTransaction(async (tx) => {
+            return this.findOrCreateAndUpdateInTx(tx, input);
+        });
+    }
+    async getPopularDishes(limit = 10, cuisine) {
+        return this.prisma.dish.findMany({
+            where: cuisine ? { cuisine } : undefined,
+            orderBy: { appearanceCount: 'desc' },
+            take: limit,
+        });
+    }
+    async getDishByName(name) {
+        return this.prisma.dish.findUnique({
+            where: { name },
+        });
+    }
+    async findOrCreateAndUpdateInTx(tx, input) {
         const { foodName, cuisine, price, nutrition, description, historicalOrigins } = input;
-        let dish = await this.prisma.dish.findUnique({
+        let dish = await tx.dish.findUnique({
             where: { name: foodName },
         });
         if (dish) {
             const newCount = dish.appearanceCount + 1;
             const oldWeight = dish.appearanceCount;
             const newWeight = 1;
-            dish = await this.prisma.dish.update({
+            dish = await tx.dish.update({
                 where: { id: dish.id },
                 data: {
                     appearanceCount: newCount,
@@ -41,10 +58,10 @@ let DishesService = DishesService_1 = class DishesService {
                     historicalOrigins: historicalOrigins || dish.historicalOrigins,
                 },
             });
-            this.logger.log(`Updated dish statistics: ${foodName} (count: ${newCount})`);
+            this.logger.debug(`Updated dish statistics: ${foodName} (count: ${newCount})`);
         }
         else {
-            dish = await this.prisma.dish.create({
+            dish = await tx.dish.create({
                 data: {
                     name: foodName,
                     cuisine,
@@ -58,7 +75,7 @@ let DishesService = DishesService_1 = class DishesService {
                     averageCarbs: nutrition.carbohydrates,
                 },
             });
-            this.logger.log(`Created new dish: ${foodName} (${cuisine})`);
+            this.logger.debug(`Created new dish: ${foodName} (${cuisine})`);
         }
         return dish;
     }
@@ -70,18 +87,6 @@ let DishesService = DishesService_1 = class DishesService {
             return newValue;
         }
         return (oldAverage * oldWeight + newValue * newWeight) / (oldWeight + newWeight);
-    }
-    async getPopularDishes(limit = 10, cuisine) {
-        return this.prisma.dish.findMany({
-            where: cuisine ? { cuisine } : undefined,
-            orderBy: { appearanceCount: 'desc' },
-            take: limit,
-        });
-    }
-    async getDishByName(name) {
-        return this.prisma.dish.findUnique({
-            where: { name },
-        });
     }
 };
 exports.DishesService = DishesService;
