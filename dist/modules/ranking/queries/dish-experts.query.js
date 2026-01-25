@@ -19,73 +19,41 @@ let DishExpertsQuery = class DishExpertsQuery {
         this.prisma = prisma;
     }
     async execute(period) {
-        const { startDate } = this.getDateRange(period);
-        const unlocks = await this.prisma.dish_unlocks.findMany({
-            where: startDate ? { firstMealAt: { gte: startDate } } : {},
-            select: {
-                userId: true,
-                dishName: true,
-                mealCount: true,
-            },
-        });
-        const userStats = new Map();
-        for (const unlock of unlocks) {
-            const existing = userStats.get(unlock.userId);
-            if (!existing) {
-                userStats.set(unlock.userId, {
-                    count: 1,
-                    totalMeals: unlock.mealCount,
-                    dishes: [unlock.dishName],
-                });
-            }
-            else {
-                existing.count++;
-                existing.totalMeals += unlock.mealCount;
-                existing.dishes.push(unlock.dishName);
-            }
-        }
-        const userMap = await this.getUserMap();
-        const experts = [];
-        for (const [userId, stats] of userStats.entries()) {
-            const user = userMap.get(userId);
-            if (!user)
-                continue;
-            experts.push({
-                rank: 0,
-                userId,
-                username: user.username,
-                avatarUrl: user.avatarUrl,
-                dishCount: stats.count,
-                mealCount: stats.totalMeals,
-                dishes: stats.dishes.slice(0, 10),
-                cuisines: [],
-            });
-        }
-        experts.sort((a, b) => b.dishCount - a.dishCount);
-        experts.forEach((e, index) => { e.rank = index + 1; });
+        const { startDate, startDateCondition } = this.getDateRangeSql(period);
+        const experts = await this.prisma.$queryRaw `
+      SELECT
+        u.id as "userId",
+        u.username,
+        u."avatarUrl",
+        COUNT(du."dishName") as "dishCount",
+        SUM(du."mealCount") as "totalMeals",
+        ARRAY_AGG(du."dishName" ORDER BY du."mealCount" DESC) as "dishes"
+      FROM users u
+      INNER JOIN dish_unlocks du ON du."userId" = u.id
+        ${startDateCondition}
+      LEFT JOIN user_settings us ON us."userId" = u.id
+      WHERE u."deletedAt" IS NULL
+        AND (us.id IS NULL OR us."hideRanking" = false)
+      GROUP BY u.id, u.username, u."avatarUrl"
+      HAVING COUNT(du."dishName") > 0
+      ORDER BY "dishCount" DESC
+      LIMIT 100
+    `;
         return {
             period,
-            experts: experts.slice(0, 100),
+            experts: experts.map((e, index) => ({
+                rank: index + 1,
+                userId: e.userId,
+                username: e.username,
+                avatarUrl: e.avatarUrl,
+                dishCount: Number(e.dishCount),
+                mealCount: Number(e.totalMeals),
+                dishes: (e.dishes || []).slice(0, 10),
+                cuisines: [],
+            })),
         };
     }
-    async getUserMap() {
-        const users = await this.prisma.user.findMany({
-            where: {
-                deletedAt: null,
-                OR: [
-                    { user_settings: { is: null } },
-                    { user_settings: { hideRanking: false } },
-                ],
-            },
-            select: {
-                id: true,
-                username: true,
-                avatarUrl: true,
-            },
-        });
-        return new Map(users.map(u => [u.id, { username: u.username, avatarUrl: u.avatarUrl }]));
-    }
-    getDateRange(period) {
+    getDateRangeSql(period) {
         const now = new Date();
         let startDate;
         switch (period) {
@@ -106,7 +74,10 @@ let DishExpertsQuery = class DishExpertsQuery {
                 startDate = undefined;
                 break;
         }
-        return { startDate };
+        const startDateCondition = startDate
+            ? client_1.Prisma.sql `AND du."firstMealAt" >= ${startDate}`
+            : client_1.Prisma.empty;
+        return { startDate, startDateCondition };
     }
 };
 exports.DishExpertsQuery = DishExpertsQuery;

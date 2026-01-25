@@ -19,100 +19,43 @@ let CuisineMastersQuery = class CuisineMastersQuery {
         this.prisma = prisma;
     }
     async execute(cuisineName, period) {
-        const { startDate } = this.getDateRange(period);
-        const [mealAggregates, userMap] = await Promise.all([
-            this.prisma.meal.groupBy({
-                by: ['userId', 'cuisine'],
-                where: this.buildMealWhere(startDate, cuisineName),
-                _count: { id: true },
-                _min: { createdAt: true },
-            }),
-            this.getUserMap(),
-        ]);
-        const rankings = [];
-        for (const aggregate of mealAggregates) {
-            const user = userMap.get(aggregate.userId);
-            if (!user)
-                continue;
-            if (cuisineName) {
-                if (aggregate.cuisine === cuisineName) {
-                    rankings.push({
-                        userId: aggregate.userId,
-                        cuisineName: aggregate.cuisine,
-                        mealCount: aggregate._count.id,
-                        firstMealAt: aggregate._min.createdAt,
-                    });
-                }
-            }
-            else {
-                rankings.push({
-                    userId: aggregate.userId,
-                    cuisineName: '全部菜系',
-                    mealCount: aggregate._count.id,
-                    firstMealAt: aggregate._min.createdAt,
-                });
-            }
-        }
-        rankings.sort((a, b) => {
-            if (b.mealCount !== a.mealCount) {
-                return b.mealCount - a.mealCount;
-            }
-            return a.firstMealAt.getTime() - b.firstMealAt.getTime();
-        });
-        const masters = rankings.slice(0, 100).map((r, index) => {
-            const user = userMap.get(r.userId);
-            return {
-                rank: index + 1,
-                userId: r.userId,
-                username: user.username,
-                avatarUrl: user.avatarUrl,
-                cuisineName: r.cuisineName,
-                mealCount: r.mealCount,
-                firstMealAt: r.firstMealAt.toISOString(),
-            };
-        });
+        const { startDate, startDateCondition } = this.getDateRangeSql(period);
+        const rankings = await this.prisma.$queryRaw `
+      SELECT
+        u.id as "userId",
+        u.username,
+        u."avatarUrl",
+        ${cuisineName ? client_1.Prisma.sql `${cuisineName}::text as "cuisineName"` : client_1.Prisma.sql `'全部菜系'::text as "cuisineName"`},
+        COUNT(m.id) as "mealCount",
+        MIN(m."createdAt") as "firstMealAt"
+      FROM users u
+      INNER JOIN meals m ON m."userId" = u.id
+        AND m."deletedAt" IS NULL
+        ${startDateCondition}
+        ${cuisineName ? client_1.Prisma.sql `AND m.cuisine = ${cuisineName}` : client_1.Prisma.empty}
+      LEFT JOIN user_settings us ON us."userId" = u.id
+      WHERE u."deletedAt" IS NULL
+        AND (us.id IS NULL OR us."hideRanking" = false)
+      GROUP BY u.id, u.username, u."avatarUrl"
+      HAVING COUNT(m.id) > 0
+      ORDER BY "mealCount" DESC, "firstMealAt" ASC
+      LIMIT 100
+    `;
         return {
             cuisineName,
             period,
-            masters,
+            masters: rankings.map((r, index) => ({
+                rank: index + 1,
+                userId: r.userId,
+                username: r.username,
+                avatarUrl: r.avatarUrl,
+                cuisineName: r.cuisineName,
+                mealCount: Number(r.mealCount),
+                firstMealAt: r.firstMealAt.toISOString(),
+            })),
         };
     }
-    buildMealWhere(startDate, cuisineName) {
-        const where = {
-            deletedAt: null,
-            users: {
-                OR: [
-                    { user_settings: { is: null } },
-                    { user_settings: { hideRanking: false } },
-                ],
-            },
-        };
-        if (startDate) {
-            where.createdAt = { gte: startDate };
-        }
-        if (cuisineName) {
-            where.cuisine = cuisineName;
-        }
-        return where;
-    }
-    async getUserMap() {
-        const users = await this.prisma.user.findMany({
-            where: {
-                deletedAt: null,
-                OR: [
-                    { user_settings: { is: null } },
-                    { user_settings: { hideRanking: false } },
-                ],
-            },
-            select: {
-                id: true,
-                username: true,
-                avatarUrl: true,
-            },
-        });
-        return new Map(users.map(u => [u.id, { username: u.username, avatarUrl: u.avatarUrl }]));
-    }
-    getDateRange(period) {
+    getDateRangeSql(period) {
         const now = new Date();
         let startDate;
         switch (period) {
@@ -133,7 +76,10 @@ let CuisineMastersQuery = class CuisineMastersQuery {
                 startDate = undefined;
                 break;
         }
-        return { startDate };
+        const startDateCondition = startDate
+            ? client_1.Prisma.sql `AND m."createdAt" >= ${startDate}`
+            : client_1.Prisma.empty;
+        return { startDate, startDateCondition };
     }
 };
 exports.CuisineMastersQuery = CuisineMastersQuery;

@@ -9,6 +9,7 @@ import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { Public } from '../../common/decorators/public.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { SuccessResponse } from '../../common/dto/response.dto';
+import { SkipUnifiedResponse } from '../../common/interceptors/unified-response.interceptor';
 
 @ApiTags('Auth')
 @Controller('auth')
@@ -17,6 +18,7 @@ export class AuthController {
 
   @Public()
   @Post('register')
+  @SkipUnifiedResponse()
   @ApiOperation({
     summary: '用户注册',
     description: '创建新用户账号，返回访问令牌和刷新令牌',
@@ -43,6 +45,7 @@ export class AuthController {
 
   @Public()
   @Post('login')
+  @SkipUnifiedResponse()
   @ApiOperation({
     summary: '用户登录',
     description: '使用用户名或邮箱登录，返回访问令牌和刷新令牌',
@@ -69,6 +72,7 @@ export class AuthController {
 
   @Public()
   @Post('refresh')
+  @SkipUnifiedResponse()
   @ApiOperation({
     summary: '刷新令牌',
     description: '使用刷新令牌获取新的访问令牌',
@@ -94,6 +98,7 @@ export class AuthController {
   }
 
   @Post('logout')
+  @SkipUnifiedResponse()
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth('bearer')
   @ApiOperation({
@@ -111,6 +116,7 @@ export class AuthController {
   }
 
   @Get('me')
+  @SkipUnifiedResponse()
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth('bearer')
   @ApiOperation({

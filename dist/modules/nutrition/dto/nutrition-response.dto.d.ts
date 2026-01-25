@@ -1,4 +1,4 @@
-import { MealResponseDto } from '../../meals/dto/meal-response.dto';
+import { SimpleMealResponse } from '../nutrition.service';
 export declare class DailyNutritionDto {
     date: string;
     totalCalories: number;
@@ -13,7 +13,7 @@ export declare class DailyNutritionDto {
     lunchCount: number;
     dinnerCount: number;
     snackCount: number;
-    meals: MealResponseDto[];
+    meals: SimpleMealResponse[];
 }
 export declare class DailyNutritionData {
     date: string;

@@ -21,6 +21,7 @@ const storage_service_1 = require("./storage.service");
 const ai_service_1 = require("../ai/ai.service");
 const meals_service_1 = require("../meals/meals.service");
 const users_service_1 = require("../users/users.service");
+const ai_queue_service_1 = require("../queue/ai-queue.service");
 const jwt_auth_guard_1 = require("../../common/guards/jwt-auth.guard");
 const current_user_decorator_1 = require("../../common/decorators/current-user.decorator");
 const response_dto_1 = require("../../common/dto/response.dto");
@@ -29,15 +30,73 @@ let StorageController = StorageController_1 = class StorageController {
     aiService;
     mealsService;
     usersService;
+    aiQueueService;
     logger = new common_1.Logger(StorageController_1.name);
-    constructor(storageService, aiService, mealsService, usersService) {
+    constructor(storageService, aiService, mealsService, usersService, aiQueueService) {
         this.storageService = storageService;
         this.aiService = aiService;
         this.mealsService = mealsService;
         this.usersService = usersService;
+        this.aiQueueService = aiQueueService;
     }
     async uploadImage(userId, file) {
         return this.storageService.uploadImage(userId, file);
+    }
+    async uploadWithAnalysisAsync(userId, file) {
+        try {
+            this.logger.log(`uploadWithAnalysisAsync called, userId: ${userId}`);
+            const quota = await this.usersService.checkAnalysisQuota(userId);
+            if (!quota.allowed) {
+                this.logger.warn(`quota exceeded for user ${userId}, limit: ${quota.limit}`);
+                throw new common_1.HttpException({
+                    statusCode: common_1.HttpStatus.TOO_MANY_REQUESTS,
+                    message: `Daily AI analysis quota exceeded. Limit: ${quota.limit}, please try again tomorrow.`,
+                    error: 'QUOTA_EXCEEDED',
+                    quota: {
+                        limit: quota.limit,
+                        remaining: quota.remaining,
+                    },
+                }, common_1.HttpStatus.TOO_MANY_REQUESTS);
+            }
+            this.logger.debug('uploading image...');
+            const uploadResult = await this.storageService.uploadImage(userId, file);
+            this.logger.debug(`upload result: ${JSON.stringify(uploadResult)}`);
+            const imageBase64 = this.storageService.fileToBase64(file);
+            this.logger.debug(`image converted to base64, length: ${imageBase64?.length}`);
+            this.logger.debug('creating AI analysis job...');
+            const job = await this.aiQueueService.createJob({
+                userId,
+                imageUrl: uploadResult.url,
+                thumbnailUrl: uploadResult.thumbnailUrl,
+                imageBase64,
+                mealType: 'SNACK',
+            });
+            this.logger.debug(`AI analysis job created: ${job.jobId}`);
+            await this.usersService.incrementAnalysisCount(userId);
+            return {
+                ...job,
+                upload: uploadResult,
+            };
+        }
+        catch (error) {
+            this.logger.error('uploadWithAnalysisAsync error:', error);
+            throw error;
+        }
+    }
+    async getJobStatus(userId, jobId) {
+        const job = await this.aiQueueService.getJob(jobId, userId);
+        if (!job) {
+            throw new common_1.HttpException({
+                statusCode: common_1.HttpStatus.NOT_FOUND,
+                message: 'Job not found',
+                code: 'NOT_FOUND',
+            }, common_1.HttpStatus.NOT_FOUND);
+        }
+        return job;
+    }
+    async getUserJobs(userId) {
+        const jobs = await this.aiQueueService.getUserJobs(userId);
+        return { jobs };
     }
     async uploadWithAnalysis(userId, file) {
         try {
@@ -144,6 +203,143 @@ __decorate([
     __metadata("design:paramtypes", [String, Object]),
     __metadata("design:returntype", Promise)
 ], StorageController.prototype, "uploadImage", null);
+__decorate([
+    (0, common_1.Post)('upload-with-analysis-async'),
+    (0, swagger_1.ApiOperation)({
+        summary: '上传图片并 AI 分析（异步）',
+        description: '上传图片并异步进行 AI 食物分析，立即返回任务 ID。客户端可使用 /storage/jobs/:jobId 轮询任务状态。此接口不阻塞 HTTP 请求，推荐使用。',
+    }),
+    (0, swagger_1.ApiConsumes)('multipart/form-data'),
+    (0, swagger_1.ApiBody)({
+        schema: {
+            type: 'object',
+            properties: {
+                file: {
+                    type: 'string',
+                    format: 'binary',
+                },
+            },
+        },
+    }),
+    (0, swagger_1.ApiResponse)({
+        status: 201,
+        description: '上传成功，返回任务 ID',
+        schema: {
+            example: {
+                jobId: 'cm1234567890',
+                status: 'PENDING',
+                message: 'AI analysis job created successfully',
+                upload: {
+                    url: 'https://xxx.supabase.co/storage/v1/object/public/meal-images/xxx.jpg',
+                    thumbnailUrl: 'https://xxx.supabase.co/storage/v1/object/public/meal-images/xxx.jpg?thumbnail=true',
+                    key: 'user-id/xxx.jpg',
+                },
+            },
+        },
+    }),
+    (0, swagger_1.ApiResponse)({
+        status: 429,
+        description: 'AI 分析配额已用完',
+        schema: {
+            example: {
+                statusCode: 429,
+                message: 'Daily AI analysis quota exceeded. Limit: 10, please try again tomorrow.',
+                error: 'QUOTA_EXCEEDED',
+                quota: {
+                    limit: 10,
+                    remaining: 0,
+                },
+            },
+        },
+    }),
+    (0, common_1.UseInterceptors)((0, platform_express_1.FileInterceptor)('file')),
+    __param(0, (0, current_user_decorator_1.CurrentUser)('userId')),
+    __param(1, (0, common_1.UploadedFile)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [String, Object]),
+    __metadata("design:returntype", Promise)
+], StorageController.prototype, "uploadWithAnalysisAsync", null);
+__decorate([
+    (0, common_1.Get)('jobs/:jobId'),
+    (0, swagger_1.ApiOperation)({
+        summary: '查询 AI 分析任务状态',
+        description: '根据任务 ID 查询 AI 分析的进度和结果',
+    }),
+    (0, swagger_1.ApiParam)({
+        name: 'jobId',
+        description: '任务 ID',
+        example: 'cm1234567890',
+    }),
+    (0, swagger_1.ApiResponse)({
+        status: 200,
+        description: '任务详情',
+        schema: {
+            example: {
+                id: 'cm1234567890',
+                status: 'COMPLETED',
+                imageUrl: 'https://xxx.supabase.co/storage/v1/object/public/meal-images/xxx.jpg',
+                thumbnailUrl: 'https://xxx.supabase.co/storage/v1/object/public/meal-images/xxx.jpg?thumbnail=true',
+                analysisResult: {
+                    dishes: [
+                        {
+                            foodName: '宫保鸡丁',
+                            cuisine: '川菜',
+                            nutrition: { calories: 320, protein: 25, fat: 18, carbohydrates: 12 },
+                        },
+                    ],
+                    nutrition: { calories: 320, protein: 25, fat: 18, carbohydrates: 12 },
+                },
+                mealId: 'cm0987654321',
+                retryCount: 0,
+                createdAt: '2024-01-15T10:30:00.000Z',
+                startedAt: '2024-01-15T10:30:02.000Z',
+                completedAt: '2024-01-15T10:30:08.000Z',
+            },
+        },
+    }),
+    (0, swagger_1.ApiResponse)({
+        status: 404,
+        description: '任务不存在',
+        schema: {
+            example: {
+                statusCode: 404,
+                message: 'Job not found',
+                code: 'NOT_FOUND',
+            },
+        },
+    }),
+    __param(0, (0, current_user_decorator_1.CurrentUser)('userId')),
+    __param(1, (0, common_1.Param)('jobId')),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [String, String]),
+    __metadata("design:returntype", Promise)
+], StorageController.prototype, "getJobStatus", null);
+__decorate([
+    (0, common_1.Get)('jobs'),
+    (0, swagger_1.ApiOperation)({
+        summary: '获取用户的 AI 分析任务列表',
+        description: '获取当前用户的最近 AI 分析任务',
+    }),
+    (0, swagger_1.ApiResponse)({
+        status: 200,
+        description: '任务列表',
+        schema: {
+            example: {
+                jobs: [
+                    {
+                        id: 'cm1234567890',
+                        status: 'COMPLETED',
+                        createdAt: '2024-01-15T10:30:00.000Z',
+                    },
+                ],
+            },
+        },
+    }),
+    __param(0, (0, current_user_decorator_1.CurrentUser)('userId')),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [String]),
+    __metadata("design:returntype", Promise)
+], StorageController.prototype, "getUserJobs", null);
 __decorate([
     (0, common_1.Post)('upload-with-analysis'),
     (0, swagger_1.ApiOperation)({
@@ -307,6 +503,7 @@ exports.StorageController = StorageController = StorageController_1 = __decorate
     __metadata("design:paramtypes", [storage_service_1.StorageService,
         ai_service_1.AiService,
         meals_service_1.MealsService,
-        users_service_1.UsersService])
+        users_service_1.UsersService,
+        ai_queue_service_1.AiQueueService])
 ], StorageController);
 //# sourceMappingURL=storage.controller.js.map

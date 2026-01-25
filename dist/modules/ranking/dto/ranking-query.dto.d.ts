@@ -12,3 +12,7 @@ export declare class LeaderboardQueryDto {
     period?: RankingPeriod;
     tier?: 'FREE' | 'PREMIUM' | 'PRO';
 }
+export declare class PaginatedQueryDto {
+    limit?: number;
+    offset?: number;
+}

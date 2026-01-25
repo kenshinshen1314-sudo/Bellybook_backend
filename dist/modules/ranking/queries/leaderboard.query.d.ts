@@ -5,7 +5,5 @@ export declare class LeaderboardQuery {
     private prisma;
     constructor(prisma: PrismaService);
     execute(period: RankingPeriod, tier: string | undefined): Promise<LeaderboardDto>;
-    private buildMealWhere;
-    private getUserMap;
-    private getDateRange;
+    private getDateRangeSql;
 }

@@ -1,6 +1,6 @@
 /**
- * [INPUT]: 依赖 Redis 连接配置
- * [OUTPUT]: 对外提供缓存服务（支持 Redis 和内存回退）
+ * [INPUT]: 依赖 Redis 连接配置、prom-client 用于指标收集
+ * [OUTPUT]: 对外提供缓存服务（支持 Redis 和内存回退）、缓存统计、缓存装饰器
  * [POS]: cache 模块的核心配置
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -9,6 +9,7 @@ import { CacheModule as NestCacheModule } from '@nestjs/cache-manager';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { redisStore } from 'cache-manager-redis-store';
 import { CacheService } from './cache.service';
+import { CacheStatsService } from './cache-stats.service';
 
 // Re-export for convenience
 export { CacheModule as NestJSCacheModule } from '@nestjs/cache-manager';
@@ -38,7 +39,7 @@ export { CacheModule as NestJSCacheModule } from '@nestjs/cache-manager';
       },
     }),
   ],
-  providers: [CacheService],
-  exports: [CacheService, NestCacheModule],
+  providers: [CacheService, CacheStatsService],
+  exports: [CacheService, CacheStatsService, NestCacheModule],
 })
 export class CacheModuleClass {}

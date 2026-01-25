@@ -1,5 +1,5 @@
 import { IsNumber, IsString, IsArray, IsEnum, IsOptional } from 'class-validator';
-import { MealResponseDto } from '../../meals/dto/meal-response.dto';
+import { SimpleMealResponse } from '../nutrition.service';
 
 export class DailyNutritionDto {
   date!: string;
@@ -15,7 +15,7 @@ export class DailyNutritionDto {
   lunchCount!: number;
   dinnerCount!: number;
   snackCount!: number;
-  meals!: MealResponseDto[];
+  meals!: SimpleMealResponse[];
 }
 
 export class DailyNutritionData {

@@ -24,6 +24,7 @@ const jwt_auth_guard_1 = require("../../common/guards/jwt-auth.guard");
 const public_decorator_1 = require("../../common/decorators/public.decorator");
 const current_user_decorator_1 = require("../../common/decorators/current-user.decorator");
 const response_dto_1 = require("../../common/dto/response.dto");
+const unified_response_interceptor_1 = require("../../common/interceptors/unified-response.interceptor");
 let AuthController = class AuthController {
     authService;
     constructor(authService) {
@@ -50,6 +51,7 @@ exports.AuthController = AuthController;
 __decorate([
     (0, public_decorator_1.Public)(),
     (0, common_1.Post)('register'),
+    (0, unified_response_interceptor_1.SkipUnifiedResponse)(),
     (0, swagger_1.ApiOperation)({
         summary: '用户注册',
         description: '创建新用户账号，返回访问令牌和刷新令牌',
@@ -78,6 +80,7 @@ __decorate([
 __decorate([
     (0, public_decorator_1.Public)(),
     (0, common_1.Post)('login'),
+    (0, unified_response_interceptor_1.SkipUnifiedResponse)(),
     (0, swagger_1.ApiOperation)({
         summary: '用户登录',
         description: '使用用户名或邮箱登录，返回访问令牌和刷新令牌',
@@ -106,6 +109,7 @@ __decorate([
 __decorate([
     (0, public_decorator_1.Public)(),
     (0, common_1.Post)('refresh'),
+    (0, unified_response_interceptor_1.SkipUnifiedResponse)(),
     (0, swagger_1.ApiOperation)({
         summary: '刷新令牌',
         description: '使用刷新令牌获取新的访问令牌',
@@ -133,6 +137,7 @@ __decorate([
 ], AuthController.prototype, "refreshTokens", null);
 __decorate([
     (0, common_1.Post)('logout'),
+    (0, unified_response_interceptor_1.SkipUnifiedResponse)(),
     (0, common_1.UseGuards)(jwt_auth_guard_1.JwtAuthGuard),
     (0, swagger_1.ApiBearerAuth)('bearer'),
     (0, swagger_1.ApiOperation)({
@@ -151,6 +156,7 @@ __decorate([
 ], AuthController.prototype, "logout", null);
 __decorate([
     (0, common_1.Get)('me'),
+    (0, unified_response_interceptor_1.SkipUnifiedResponse)(),
     (0, common_1.UseGuards)(jwt_auth_guard_1.JwtAuthGuard),
     (0, swagger_1.ApiBearerAuth)('bearer'),
     (0, swagger_1.ApiOperation)({

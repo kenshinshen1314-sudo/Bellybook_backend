@@ -5,7 +5,8 @@
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
 import { Injectable, Logger } from '@nestjs/common';
-import { CacheService, CacheTTL, CachePrefix } from '../../cache/cache.service';
+import { CacheService } from '../../cache/cache.service';
+import { CacheTTL, CachePrefix } from '../../cache/cache.constants';
 
 /**
  * 排行榜缓存 TTL 配置（秒）
@@ -29,7 +30,7 @@ export class RankingCacheService {
    * 获取缓存数据
    */
   async get<T>(key: string): Promise<T | null> {
-    const value = await this.cacheService.getWithPrefix<T>(CachePrefix.RANKING, key);
+    const value = await this.cacheService.getWithPrefix<T>('RANKING' as any, key);
     return value ?? null;
   }
 
@@ -37,14 +38,14 @@ export class RankingCacheService {
    * 设置缓存
    */
   async set<T>(key: string, data: T, ttl: number = RankingCacheTTL.LEADERBOARD): Promise<void> {
-    await this.cacheService.setWithPrefix(CachePrefix.RANKING, key, data, ttl);
+    await this.cacheService.setWithPrefix('RANKING' as any, key, data, ttl);
   }
 
   /**
    * 删除缓存
    */
   async delete(key: string): Promise<void> {
-    await this.cacheService.delWithPrefix(CachePrefix.RANKING, key);
+    await this.cacheService.delWithPrefix('RANKING' as any, key);
   }
 
   /**
@@ -70,7 +71,7 @@ export class RankingCacheService {
    */
   async clearPeriod(period: string): Promise<void> {
     // 删除包含该时间段的所有缓存键
-    await this.cacheService.delPattern(`${CachePrefix.RANKING}:*:${period}`);
+    await this.cacheService.delPattern(`ranking:*:${period}`);
     this.logger.log(`Cleared ranking cache for period: ${period}`);
   }
 
@@ -80,7 +81,7 @@ export class RankingCacheService {
   async warmup(keysAndValues: Array<{ key: string; value: unknown; ttl?: number }>): Promise<void> {
     await this.cacheService.setMany(
       keysAndValues.map(({ key, value, ttl }) => ({
-        key: `${CachePrefix.RANKING}:${key}`,
+        key: `ranking:${key}`,
         value,
         ttl: ttl ?? RankingCacheTTL.LEADERBOARD,
       }))
@@ -96,7 +97,7 @@ export class RankingCacheService {
     note: string;
   }> {
     return {
-      prefix: CachePrefix.RANKING,
+      prefix: 'ranking',
       note: 'Redis cache stats require direct Redis client connection',
     };
   }

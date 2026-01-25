@@ -9,8 +9,9 @@ var __metadata = (this && this.__metadata) || function (k, v) {
     if (typeof Reflect === "object" && typeof Reflect.metadata === "function") return Reflect.metadata(k, v);
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.LeaderboardQueryDto = exports.CuisineMastersQueryDto = exports.RankingPeriod = void 0;
+exports.PaginatedQueryDto = exports.LeaderboardQueryDto = exports.CuisineMastersQueryDto = exports.RankingPeriod = void 0;
 const class_validator_1 = require("class-validator");
+const class_transformer_1 = require("class-transformer");
 var RankingPeriod;
 (function (RankingPeriod) {
     RankingPeriod["WEEKLY"] = "WEEKLY";
@@ -30,7 +31,9 @@ __decorate([
 ], CuisineMastersQueryDto.prototype, "cuisineName", void 0);
 __decorate([
     (0, class_validator_1.IsOptional)(),
-    (0, class_validator_1.IsEnum)(RankingPeriod),
+    (0, class_validator_1.IsEnum)(RankingPeriod, {
+        message: 'period must be one of: WEEKLY, MONTHLY, YEARLY, ALL_TIME'
+    }),
     __metadata("design:type", String)
 ], CuisineMastersQueryDto.prototype, "period", void 0);
 class LeaderboardQueryDto {
@@ -40,12 +43,37 @@ class LeaderboardQueryDto {
 exports.LeaderboardQueryDto = LeaderboardQueryDto;
 __decorate([
     (0, class_validator_1.IsOptional)(),
-    (0, class_validator_1.IsEnum)(RankingPeriod),
+    (0, class_validator_1.IsEnum)(RankingPeriod, {
+        message: 'period must be one of: WEEKLY, MONTHLY, YEARLY, ALL_TIME'
+    }),
     __metadata("design:type", String)
 ], LeaderboardQueryDto.prototype, "period", void 0);
 __decorate([
     (0, class_validator_1.IsOptional)(),
     (0, class_validator_1.IsString)(),
+    (0, class_validator_1.IsIn)(['FREE', 'PREMIUM', 'PRO'], {
+        message: 'tier must be one of: FREE, PREMIUM, PRO'
+    }),
     __metadata("design:type", String)
 ], LeaderboardQueryDto.prototype, "tier", void 0);
+class PaginatedQueryDto {
+    limit = 50;
+    offset = 0;
+}
+exports.PaginatedQueryDto = PaginatedQueryDto;
+__decorate([
+    (0, class_validator_1.IsOptional)(),
+    (0, class_transformer_1.Type)(() => Number),
+    (0, class_validator_1.IsInt)({ message: 'limit must be an integer' }),
+    (0, class_validator_1.Min)(1, { message: 'limit must be at least 1' }),
+    (0, class_validator_1.Max)(100, { message: 'limit must not exceed 100' }),
+    __metadata("design:type", Number)
+], PaginatedQueryDto.prototype, "limit", void 0);
+__decorate([
+    (0, class_validator_1.IsOptional)(),
+    (0, class_transformer_1.Type)(() => Number),
+    (0, class_validator_1.IsInt)({ message: 'offset must be an integer' }),
+    (0, class_validator_1.Min)(0, { message: 'offset must be non-negative' }),
+    __metadata("design:type", Number)
+], PaginatedQueryDto.prototype, "offset", void 0);
 //# sourceMappingURL=ranking-query.dto.js.map

@@ -1,19 +1,20 @@
 /**
- * [INPUT]: 依赖 PrismaService 的数据库访问能力
+ * [INPUT]: 依赖 PrismaService 的数据库访问能力、CacheService 的缓存能力
  * [OUTPUT]: 对外提供排行榜、菜系专家、美食家、菜品专家统计
  * [POS]: ranking 模块的核心服务层，被 ranking.controller 消费
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  *
- * [PERFORMANCE NOTE]
- * 当前实现在内存中进行聚合计算，适合中小规模数据（<10000 meals）。
- * 如需优化，可考虑：
- * - 使用数据库视图预计算统计数据
- * - 添加 Redis 缓存层（TTL: 5分钟）
- * - 使用 Prisma 的 groupBy 或原始 SQL 聚合查询
+ * [PERFORMANCE OPTIMIZED]
+ * - 添加 Redis 缓存层，TTL: 5分钟（中等频率更新）
+ * - 使用 @Cacheable 装饰器自动管理缓存
  */
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../database/prisma.service';
 import { Prisma } from '@prisma/client';
+import { CacheService } from '../cache/cache.service';
+import { CacheStatsService } from '../cache/cache-stats.service';
+import { Cacheable } from '../cache/cache.decorator';
+import { CachePrefix, CacheTTL } from '../cache/cache.constants';
 import { CuisineMastersDto, LeaderboardDto, RankingStatsDto, GourmetsDto, DishExpertsDto, CuisineMasterEntry, LeaderboardEntry, GourmetEntry, DishExpertEntry, CuisineExpertDetailDto, CuisineExpertDishEntry, AllUsersDishesDto, UserUnlockedDishesDto, UnlockedDishEntry } from './dto/ranking-response.dto';
 import { RankingPeriod } from './dto/ranking-query.dto';
 
@@ -21,12 +22,17 @@ import { RankingPeriod } from './dto/ranking-query.dto';
 export class RankingService {
   private readonly logger = new Logger(RankingService.name);
 
-  constructor(private prisma: PrismaService) { }
+  constructor(
+    private prisma: PrismaService,
+    public cacheService: CacheService,
+    public cacheStatsService: CacheStatsService,
+  ) { }
 
   /**
    * 获取菜系专家榜
    * 过滤掉 hideRanking: true 的用户
    */
+  @Cacheable('ranking:cuisine_masters', ['cuisineName', 'period'], CacheTTL.MEDIUM)
   async getCuisineMasters(
     cuisineName?: string,
     period: RankingPeriod = RankingPeriod.ALL_TIME,
@@ -165,6 +171,7 @@ export class RankingService {
   /**
    * 获取综合排行榜
    */
+  @Cacheable('ranking:leaderboard', ['period', 'tier'], CacheTTL.MEDIUM)
   async getLeaderboard(
     period: RankingPeriod = RankingPeriod.ALL_TIME,
     tier?: string,
@@ -273,6 +280,7 @@ export class RankingService {
   /**
    * 获取排行榜统计数据
    */
+  @Cacheable('ranking:stats', ['period'], CacheTTL.MEDIUM)
   async getRankingStats(period: RankingPeriod = RankingPeriod.ALL_TIME): Promise<RankingStatsDto> {
     const { startDate } = this.getDateRange(period);
 
@@ -332,6 +340,7 @@ export class RankingService {
    * 获取美食家榜
    * 统计每个用户的去重后菜系数量，倒序展示
    */
+  @Cacheable('ranking:gourmets', ['period'], CacheTTL.MEDIUM)
   async getGourmets(period: RankingPeriod = RankingPeriod.ALL_TIME): Promise<GourmetsDto> {
     const { startDate } = this.getDateRange(period);
 
@@ -430,6 +439,7 @@ export class RankingService {
    * 统计每个用户的去重后菜品数量，倒序展示
    * 优化：直接从 dish_unlocks 表读取统计数据，同时从 meals 表获取菜系信息
    */
+  @Cacheable('ranking:dish_experts', ['period'], CacheTTL.MEDIUM)
   async getDishExperts(period: RankingPeriod = RankingPeriod.ALL_TIME): Promise<DishExpertsDto> {
     const { startDate } = this.getDateRange(period);
 
@@ -584,6 +594,7 @@ export class RankingService {
   /**
    * 获取菜系专家详情
    * 展示指定用户在指定菜系下的所有菜品
+   * 优化：使用 SQL 聚合减少数据传输和内存分组
    */
   async getCuisineExpertDetail(
     userId: string,
@@ -592,7 +603,7 @@ export class RankingService {
   ): Promise<CuisineExpertDetailDto> {
     const { startDate } = this.getDateRange(period);
 
-    // 获取用户信息
+    // 获取用户信息 - 只查询必要字段
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
       select: {
@@ -606,32 +617,41 @@ export class RankingService {
       throw new NotFoundException('User not found');
     }
 
-    // 构建查询条件
-    const where: Prisma.MealWhereInput = {
-      userId,
-      cuisine: cuisineName,
-      deletedAt: null,
-    };
+    // 构建日期条件
+    const dateFilter = startDate
+      ? `AND m."createdAt" >= '${startDate.toISOString()}'`
+      : '';
 
-    if (startDate) {
-      where.createdAt = { gte: startDate };
-    }
+    // 使用 SQL 聚合直接获取分组统计结果，减少数据传输
+    const dishes = await this.prisma.$queryRaw<Array<{
+      dishname: string;
+      cuisine: string;
+      mealcount: bigint;
+      firstmealat: Date;
+      lastmealat: Date;
+      imageurl: string | null;
+      calories: number | null;
+      notes: string | null;
+    }>>`
+      SELECT
+        m."foodName" AS dishname,
+        m.cuisine,
+        COUNT(*) AS mealcount,
+        MIN(m."createdAt") AS firstmealat,
+        MAX(m."createdAt") AS lastmealat,
+        MAX(m."imageUrl") AS imageurl,
+        MAX(m.calories) AS calories,
+        MAX(m.notes) AS notes
+      FROM meals m
+      WHERE m."userId" = ${userId}
+        AND m.cuisine = ${cuisineName}
+        AND m."deletedAt" IS NULL
+        ${dateFilter}
+      GROUP BY m."foodName", m.cuisine
+      ORDER BY mealcount DESC
+    `;
 
-    // 获取该用户在该菜系下的所有餐食记录
-    const meals = await this.prisma.meal.findMany({
-      where,
-      select: {
-        foodName: true,
-        cuisine: true,
-        createdAt: true,
-        imageUrl: true,
-        calories: true,
-        notes: true,
-      },
-      orderBy: { createdAt: 'desc' },
-    });
-
-    if (meals.length === 0) {
+    if (dishes.length === 0) {
       return {
         userId: user.id,
         username: user.username,
@@ -644,35 +664,20 @@ export class RankingService {
       };
     }
 
-    // 按菜品名称分组统计
-    const dishStats = new Map<string, CuisineExpertDishEntry>();
+    // 计算总餐食数
+    const totalMeals = dishes.reduce((sum, d) => sum + Number(d.mealcount), 0);
 
-    for (const meal of meals) {
-      const existing = dishStats.get(meal.foodName);
-
-      if (!existing) {
-        dishStats.set(meal.foodName, {
-          dishName: meal.foodName,
-          cuisine: meal.cuisine,
-          mealCount: 1,
-          firstMealAt: new Date(meal.createdAt).toISOString(),
-          lastMealAt: new Date(meal.createdAt).toISOString(),
-          imageUrl: meal.imageUrl,
-          calories: meal.calories || undefined,
-          notes: meal.notes || undefined,
-        });
-      } else {
-        existing.mealCount++;
-        existing.lastMealAt = new Date(meal.createdAt).toISOString();
-      }
-    }
-
-    // 转换为数组并按 mealCount 降序排序
-    const dishes = Array.from(dishStats.values()).sort((a, b) => b.mealCount - a.mealCount);
-
-    // 统计总数
-    const totalMeals = meals.length;
-    const totalDishes = dishes.length;
+    // 转换为响应格式
+    const dishEntries: CuisineExpertDishEntry[] = dishes.map(d => ({
+      dishName: d.dishname,
+      cuisine: d.cuisine,
+      mealCount: Number(d.mealcount),
+      firstMealAt: new Date(d.firstmealat).toISOString(),
+      lastMealAt: new Date(d.lastmealat).toISOString(),
+      imageUrl: d.imageurl || undefined,
+      calories: d.calories || undefined,
+      notes: d.notes || undefined,
+    }));
 
     return {
       userId: user.id,
@@ -680,9 +685,9 @@ export class RankingService {
       avatarUrl: user.avatarUrl,
       cuisineName,
       period,
-      totalDishes,
+      totalDishes: dishes.length,
       totalMeals,
-      dishes,
+      dishes: dishEntries,
     };
   }
 
@@ -823,9 +828,10 @@ export class RankingService {
   /**
    * 获取用户已解锁的菜肴
    * 从 dish_unlocks 表读取用户所有已解锁的菜肴
+   * 优化：使用 JOIN 查询替代两次独立查询，减少数据库往返
    */
   async getUserUnlockedDishes(userId: string): Promise<UserUnlockedDishesDto> {
-    // 获取用户信息
+    // 获取用户信息 - 只查询必要字段
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
       select: {
@@ -839,64 +845,54 @@ export class RankingService {
       throw new NotFoundException('User not found');
     }
 
-    // 从 dish_unlocks 表获取用户已解锁的菜肴
-    const unlocks = await this.prisma.dish_unlocks.findMany({
-      where: { userId },
-      select: {
-        dishName: true,
-        mealCount: true,
-        firstMealAt: true,
-        lastMealAt: true,
-      },
-      orderBy: { lastMealAt: 'desc' },
-    });
-
-    // 获取菜品的详细信息（菜系、图片、热量等）
-    const dishNames = unlocks.map(u => u.dishName);
-    const mealsInfo = await this.prisma.meal.findMany({
-      where: {
-        foodName: { in: dishNames },
-        userId,
-        deletedAt: null,
-      },
-      select: {
-        foodName: true,
-        cuisine: true,
-        imageUrl: true,
-        calories: true,
-      },
-      distinct: ['foodName'],
-    });
-
-    // 构建菜品信息映射
-    const dishInfoMap = new Map<string, { cuisine: string; imageUrl?: string; calories?: number }>();
-    for (const meal of mealsInfo) {
-      dishInfoMap.set(meal.foodName, {
-        cuisine: meal.cuisine,
-        imageUrl: meal.imageUrl || undefined,
-        calories: meal.calories || undefined,
-      });
-    }
+    // 使用 JOIN 查询一次性获取所有数据
+    const dishes = await this.prisma.$queryRaw<Array<{
+      dishname: string;
+      mealcount: number;
+      firstmealat: Date;
+      lastmealat: Date;
+      cuisine: string | null;
+      imageurl: string | null;
+      calories: number | null;
+    }>>`
+      SELECT
+        du."dishName" AS dishname,
+        du."mealCount" AS mealcount,
+        du."firstMealAt" AS firstmealat,
+        du."lastMealAt" AS lastmealat,
+        m.cuisine,
+        m."imageUrl" AS imageurl,
+        m.calories
+      FROM dish_unlocks du
+      LEFT JOIN LATERAL (
+        SELECT
+          m2.cuisine,
+          m2."imageUrl",
+          m2.calories
+        FROM meals m2
+        WHERE m2."userId" = du."userId"
+          AND m2."foodName" = du."dishName"
+          AND m2."deletedAt" IS NULL
+        ORDER BY m2."createdAt" DESC
+        LIMIT 1
+      ) m ON true
+      WHERE du."userId" = ${userId}
+      ORDER BY du."mealCount" DESC
+    `;
 
     // 构建响应数据
-    const dishes: UnlockedDishEntry[] = unlocks.map(unlock => {
-      const info = dishInfoMap.get(unlock.dishName);
-      return {
-        dishName: unlock.dishName,
-        cuisine: info?.cuisine || '未知',
-        mealCount: unlock.mealCount,
-        firstMealAt: unlock.firstMealAt.toISOString(),
-        lastMealAt: unlock.lastMealAt?.toISOString() || unlock.firstMealAt.toISOString(),
-        imageUrl: info?.imageUrl,
-        calories: info?.calories,
-      };
-    });
-
-    // 按 mealCount 降序排序
-    dishes.sort((a, b) => b.mealCount - a.mealCount);
+    const dishEntries: UnlockedDishEntry[] = dishes.map(d => ({
+      dishName: d.dishname,
+      cuisine: d.cuisine || '未知',
+      mealCount: d.mealcount,
+      firstMealAt: new Date(d.firstmealat).toISOString(),
+      lastMealAt: new Date(d.lastmealat).toISOString(),
+      imageUrl: d.imageurl || undefined,
+      calories: d.calories || undefined,
+    }));
 
     // 统计总数
-    const totalMeals = dishes.reduce((sum, d) => sum + d.mealCount, 0);
+    const totalMeals = dishes.reduce((sum, d) => sum + d.mealcount, 0);
 
     return {
       userId: user.id,
@@ -904,7 +900,7 @@ export class RankingService {
       avatarUrl: user.avatarUrl,
       totalDishes: dishes.length,
       totalMeals,
-      dishes,
+      dishes: dishEntries,
     };
   }
 }

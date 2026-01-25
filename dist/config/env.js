@@ -3,6 +3,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.env = exports.validateEnv = void 0;
 require("dotenv/config");
 const zod_1 = require("zod");
+const common_1 = require("@nestjs/common");
 const envSchema = zod_1.z.object({
     DATABASE_URL: zod_1.z.string().url(),
     DIRECT_URL: zod_1.z.string().url(),
@@ -39,8 +40,9 @@ const envSchema = zod_1.z.object({
 const validateEnv = () => {
     const parsed = envSchema.safeParse(process.env);
     if (!parsed.success) {
-        console.error('❌ Invalid environment variables:');
-        console.error(parsed.error.flatten().fieldErrors);
+        const logger = new common_1.Logger('EnvValidation');
+        logger.error('❌ Invalid environment variables:');
+        logger.error(parsed.error.flatten().fieldErrors);
         throw new Error('Environment validation failed');
     }
     return parsed.data;

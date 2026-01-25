@@ -89,14 +89,14 @@ let RankingOptimizedService = RankingOptimizedService_1 = class RankingOptimized
         await this.cacheService.set(cacheKey, result);
         return result;
     }
-    async getCuisineExpertDetail(userId, cuisineName, period = client_1.RankingPeriod.ALL_TIME) {
-        return this.userDetailsQuery.getCuisineExpertDetail(userId, cuisineName, period);
+    async getCuisineExpertDetail(userId, cuisineName, period = client_1.RankingPeriod.ALL_TIME, limit = 50, offset = 0) {
+        return this.userDetailsQuery.getCuisineExpertDetail(userId, cuisineName, period, limit, offset);
     }
     async getAllUsersDishes(period = client_1.RankingPeriod.WEEKLY) {
         return this.userDetailsQuery.getAllUsersDishes(period);
     }
-    async getUserUnlockedDishes(userId) {
-        return this.userDetailsQuery.getUserUnlockedDishes(userId);
+    async getUserUnlockedDishes(userId, limit = 50, offset = 0) {
+        return this.userDetailsQuery.getUserUnlockedDishes(userId, limit, offset);
     }
     async clearExpiredCache() {
         await this.cacheService.clearExpired();

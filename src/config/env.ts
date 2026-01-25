@@ -1,5 +1,6 @@
 import 'dotenv/config';
 import { z } from 'zod';
+import { Logger } from '@nestjs/common';
 
 const envSchema = z.object({
   // Database
@@ -61,8 +62,9 @@ export const validateEnv = (): Env => {
   const parsed = envSchema.safeParse(process.env);
 
   if (!parsed.success) {
-    console.error('❌ Invalid environment variables:');
-    console.error(parsed.error.flatten().fieldErrors);
+    const logger = new Logger('EnvValidation');
+    logger.error('❌ Invalid environment variables:');
+    logger.error(parsed.error.flatten().fieldErrors);
     throw new Error('Environment validation failed');
   }
 

@@ -315,6 +315,9 @@ class CuisineExpertDetailDto {
     totalDishes;
     totalMeals;
     dishes;
+    offset;
+    limit;
+    hasMore;
 }
 exports.CuisineExpertDetailDto = CuisineExpertDetailDto;
 __decorate([
@@ -349,6 +352,18 @@ __decorate([
     (0, swagger_1.ApiProperty)({ description: '菜品列表', type: [CuisineExpertDishEntry] }),
     __metadata("design:type", Array)
 ], CuisineExpertDetailDto.prototype, "dishes", void 0);
+__decorate([
+    (0, swagger_1.ApiProperty)({ description: '分页：当前页偏移量', required: false }),
+    __metadata("design:type", Number)
+], CuisineExpertDetailDto.prototype, "offset", void 0);
+__decorate([
+    (0, swagger_1.ApiProperty)({ description: '分页：每页条目数', required: false }),
+    __metadata("design:type", Number)
+], CuisineExpertDetailDto.prototype, "limit", void 0);
+__decorate([
+    (0, swagger_1.ApiProperty)({ description: '分页：是否有更多数据', required: false }),
+    __metadata("design:type", Boolean)
+], CuisineExpertDetailDto.prototype, "hasMore", void 0);
 class UserCuisineStats {
     rank;
     userId;
@@ -465,6 +480,9 @@ class UserUnlockedDishesDto {
     totalDishes;
     totalMeals;
     dishes;
+    offset;
+    limit;
+    hasMore;
 }
 exports.UserUnlockedDishesDto = UserUnlockedDishesDto;
 __decorate([
@@ -491,4 +509,16 @@ __decorate([
     (0, swagger_1.ApiProperty)({ description: '已解锁菜品列表', type: [UnlockedDishEntry] }),
     __metadata("design:type", Array)
 ], UserUnlockedDishesDto.prototype, "dishes", void 0);
+__decorate([
+    (0, swagger_1.ApiProperty)({ description: '分页：当前页偏移量', required: false }),
+    __metadata("design:type", Number)
+], UserUnlockedDishesDto.prototype, "offset", void 0);
+__decorate([
+    (0, swagger_1.ApiProperty)({ description: '分页：每页条目数', required: false }),
+    __metadata("design:type", Number)
+], UserUnlockedDishesDto.prototype, "limit", void 0);
+__decorate([
+    (0, swagger_1.ApiProperty)({ description: '分页：是否有更多数据', required: false }),
+    __metadata("design:type", Boolean)
+], UserUnlockedDishesDto.prototype, "hasMore", void 0);
 //# sourceMappingURL=ranking-response.dto.js.map

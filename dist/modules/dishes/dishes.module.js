@@ -10,12 +10,13 @@ exports.DishesModule = void 0;
 const common_1 = require("@nestjs/common");
 const dishes_service_1 = require("./dishes.service");
 const database_module_1 = require("../../database/database.module");
+const cache_module_1 = require("../cache/cache.module");
 let DishesModule = class DishesModule {
 };
 exports.DishesModule = DishesModule;
 exports.DishesModule = DishesModule = __decorate([
     (0, common_1.Module)({
-        imports: [database_module_1.DatabaseModule],
+        imports: [database_module_1.DatabaseModule, cache_module_1.CacheModuleClass],
         providers: [dishes_service_1.DishesService],
         exports: [dishes_service_1.DishesService],
     })

@@ -19,49 +19,45 @@ let StatsQuery = class StatsQuery {
         this.prisma = prisma;
     }
     async execute(period) {
-        const { startDate } = this.getDateRange(period);
-        const [totalUsers, totalMeals, uniqueCuisines] = await Promise.all([
-            this.prisma.user.count({
-                where: {
-                    deletedAt: null,
-                    OR: [
-                        { user_settings: { is: null } },
-                        { user_settings: { hideRanking: false } },
-                    ],
-                },
-            }),
-            this.prisma.meal.count({
-                where: {
-                    deletedAt: null,
-                    ...(startDate && { createdAt: { gte: startDate } }),
-                },
-            }),
-            this.prisma.meal.findMany({
-                where: {
-                    deletedAt: null,
-                    ...(startDate && { createdAt: { gte: startDate } }),
-                },
-                select: { cuisine: true },
-                distinct: ['cuisine'],
-            }),
+        const { startDate, startDateCondition } = this.getDateRangeSql(period);
+        const [userStats, mealStats] = await Promise.all([
+            this.prisma.$queryRaw `
+        SELECT
+          (SELECT COUNT(*) FROM users u
+           LEFT JOIN user_settings us ON us."userId" = u.id
+           WHERE u."deletedAt" IS NULL
+             AND (us.id IS NULL OR us."hideRanking" = false)
+          ) as "totalUsers",
+          (SELECT COUNT(DISTINCT m."userId")
+           FROM meals m
+           WHERE m."deletedAt" IS NULL
+             ${startDateCondition}
+          ) as "activeUsers"
+      `,
+            this.prisma.$queryRaw `
+        SELECT
+          COUNT(*) as "totalMeals",
+          COUNT(DISTINCT cuisine) as "totalCuisines"
+        FROM meals m
+        WHERE m."deletedAt" IS NULL
+          ${startDateCondition}
+      `,
         ]);
-        const activeUsers = await this.prisma.$queryRaw `
-      SELECT COUNT(DISTINCT "userId") as count
-      FROM "meals"
-      WHERE "deletedAt" IS NULL
-        ${startDate ? client_1.Prisma.sql `AND "createdAt" >= ${startDate}` : client_1.Prisma.empty}
-    `;
+        const totalUsers = Number(userStats[0]?.totalUsers || 0);
+        const activeUsers = Number(userStats[0]?.activeUsers || 0);
+        const totalMeals = Number(mealStats[0]?.totalMeals || 0);
+        const totalCuisines = Number(mealStats[0]?.totalCuisines || 0);
         const avgMealsPerUser = totalUsers > 0 ? totalMeals / totalUsers : 0;
         return {
             period,
             totalUsers,
-            activeUsers: Number(activeUsers[0]?.count || 0),
+            activeUsers,
             totalMeals,
-            totalCuisines: uniqueCuisines.length,
+            totalCuisines,
             avgMealsPerUser: Math.round(avgMealsPerUser * 100) / 100,
         };
     }
-    getDateRange(period) {
+    getDateRangeSql(period) {
         const now = new Date();
         let startDate;
         switch (period) {
@@ -82,7 +78,10 @@ let StatsQuery = class StatsQuery {
                 startDate = undefined;
                 break;
         }
-        return { startDate };
+        const startDateCondition = startDate
+            ? client_1.Prisma.sql `AND m."createdAt" >= ${startDate}`
+            : client_1.Prisma.empty;
+        return { startDate, startDateCondition };
     }
 };
 exports.StatsQuery = StatsQuery;

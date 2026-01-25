@@ -1,10 +1,10 @@
 /**
- * [INPUT]: 依赖 PrismaService 的数据库访问、DishesService 的菜品知识库操作、DateUtil 的日期处理
+ * [INPUT]: 依赖 PrismaService 的数据库访问、DishesService 的菜品知识库操作、DateUtil 的日期处理、CacheService 的缓存失效
  * [OUTPUT]: 对外提供餐食 CRUD、今日餐食、按日期查询、按菜品查询
  * [POS]: meals 模块的核心服务层，被 storage、sync 模块消费
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
-import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, BadRequestException } from '@nestjs/common';
 import { Meal, Prisma, PrismaClient } from '@prisma/client';
 import { PrismaService } from '../../database/prisma.service';
 import { CreateMealDto } from './dto/create-meal.dto';
@@ -14,6 +14,9 @@ import { MealQueryDto } from './dto/meal-query.dto';
 import { PaginatedResponse } from '../../common/dto/pagination.dto';
 import { DishesService } from '../dishes/dishes.service';
 import { DateUtil } from '../../common/utils/date.util';
+import { CacheService } from '../cache/cache.service';
+import { CacheInvalidate } from '../cache/cache.decorator';
+import { CachePrefix } from '../cache/cache.constants';
 import {
   AiAnalysis,
   AiDishInfo,
@@ -28,6 +31,7 @@ export class MealsService {
   constructor(
     private prisma: PrismaService,
     private dishesService: DishesService,
+    public cacheService: CacheService,
   ) {}
 
   // ============================================================
@@ -44,7 +48,10 @@ export class MealsService {
    * 4. 更新菜系解锁、每日营养、菜品解锁
    *
    * 所有步骤在单个事务中完成，确保数据一致性
+   *
+   * 缓存失效：创建 meal 后失效相关缓存
    */
+  @CacheInvalidate(CachePrefix.CUISINE_UNLOCKS, ['userId'], `${CachePrefix.CUISINE_UNLOCKS}:${CachePrefix.CUISINE_UNLOCKS}:*`)
   async create(userId: string, dto: CreateMealDto): Promise<MealResponseDto> {
     const firstDish = this.extractFirstDish(dto.analysis);
 
@@ -112,7 +119,36 @@ export class MealsService {
 
     this.logger.log(`Meal created: ${result.meal.id} for user: ${userId}`);
 
+    // 失效相关缓存
+    await this.invalidateRelatedCaches(userId);
+
     return this.mapToMealResponse(result.meal);
+  }
+
+  /**
+   * 失效用户相关的缓存
+   * 当创建、更新、删除 meal 时调用
+   */
+  private async invalidateRelatedCaches(userId: string): Promise<void> {
+    // 失效菜系统计缓存
+    await this.cacheService.del(`${CachePrefix.CUISINE_UNLOCKS}:cuisine:stats:${userId}`);
+
+    // 失效用户统计缓存
+    await this.cacheService.del(`${CachePrefix.USER}:${userId}:stats`);
+
+    // 失效今日营养缓存
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const todayStr = today.toISOString().split('T')[0];
+    await this.cacheService.del(`${CachePrefix.DAILY_NUTRITION}:${userId}:${todayStr}`);
+
+    // 失效营养摘要缓存（所有 period）
+    const periods = ['week', 'month', 'year', 'all'];
+    await Promise.all(
+      periods.map(period =>
+        this.cacheService.del(`${CachePrefix.DAILY_NUTRITION}:summary:${userId}:${period}`)
+      )
+    );
   }
 
   /**
@@ -549,7 +585,7 @@ export class MealsService {
   private extractFirstDish(analysis: AiAnalysis): AiDishInfo {
     const firstDish = analysis.dishes?.[0];
     if (!firstDish) {
-      throw new Error('Invalid AI response: no dishes found');
+      throw new BadRequestException('Invalid AI response: no dishes found');
     }
     return firstDish;
   }

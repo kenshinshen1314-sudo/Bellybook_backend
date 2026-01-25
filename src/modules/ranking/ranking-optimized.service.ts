@@ -147,14 +147,16 @@ export class RankingOptimizedService {
   }
 
   /**
-   * 获取菜系专家详情（不含缓存，个性化数据）
+   * 获取菜系专家详情（不含缓存，个性化数据，支持分页）
    */
   async getCuisineExpertDetail(
     userId: string,
     cuisineName: string,
     period: RankingPeriod = RankingPeriod.ALL_TIME,
+    limit = 50,
+    offset = 0,
   ): Promise<CuisineExpertDetailDto> {
-    return this.userDetailsQuery.getCuisineExpertDetail(userId, cuisineName, period);
+    return this.userDetailsQuery.getCuisineExpertDetail(userId, cuisineName, period, limit, offset);
   }
 
   /**
@@ -165,10 +167,14 @@ export class RankingOptimizedService {
   }
 
   /**
-   * 获取用户已解锁的菜肴（不含缓存，个性化数据）
+   * 获取用户已解锁的菜肴（不含缓存，个性化数据，支持分页）
    */
-  async getUserUnlockedDishes(userId: string): Promise<UserUnlockedDishesDto> {
-    return this.userDetailsQuery.getUserUnlockedDishes(userId);
+  async getUserUnlockedDishes(
+    userId: string,
+    limit = 50,
+    offset = 0,
+  ): Promise<UserUnlockedDishesDto> {
+    return this.userDetailsQuery.getUserUnlockedDishes(userId, limit, offset);
   }
 
   /**

@@ -4,7 +4,7 @@
  * [POS]: ai 模块的核心服务层，被 storage.controller 消费
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
-import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit, BadRequestException } from '@nestjs/common';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { env } from '../../config/env';
 import { HttpsProxyAgent } from 'https-proxy-agent';
@@ -132,7 +132,7 @@ export class AiService implements OnModuleInit {
         const jsonMatch = text.match(/\{[\s\S]*\}/);
         if (!jsonMatch) {
           this.logger.error(`AI response format error. Response length: ${text.length}, Response: ${text}`);
-          throw new Error(`Invalid response format from AI. Response: ${text.substring(0, 200)}...`);
+          throw new BadRequestException(`Invalid response format from AI. Response: ${text.substring(0, 200)}...`);
         }
 
         let analysis: AiRawResponse;
@@ -140,7 +140,7 @@ export class AiService implements OnModuleInit {
           analysis = JSON.parse(jsonMatch[0]);
         } catch (parseError) {
           this.logger.error(`Failed to parse JSON: ${jsonMatch[0]}`);
-          throw new Error(`AI returned invalid JSON format: ${(parseError as Error).message}`);
+          throw new BadRequestException(`AI returned invalid JSON format: ${(parseError as Error).message}`);
         }
 
         // 统一规范化为 dishes 数组结构
@@ -178,7 +178,7 @@ export class AiService implements OnModuleInit {
         // JSON 解析错误不重试
         if (error instanceof SyntaxError) {
           this.logger.error('Failed to parse AI response as JSON', (error as Error).stack);
-          throw new Error('AI returned invalid JSON format');
+          throw new BadRequestException('AI returned invalid JSON format');
         }
 
         // 检查是否为可重试的错误
@@ -246,7 +246,7 @@ export class AiService implements OnModuleInit {
         nutrition: this.validateAndNormalizeNutrition(analysis.nutrition),
       }];
     } else {
-      throw new Error('Invalid AI response: neither dishes nor foodName found');
+      throw new BadRequestException('Invalid AI response: neither dishes nor foodName found');
     }
   }
 

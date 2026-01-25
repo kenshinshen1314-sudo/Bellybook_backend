@@ -5,6 +5,5 @@ export declare class DishExpertsQuery {
     private prisma;
     constructor(prisma: PrismaService);
     execute(period: RankingPeriod): Promise<DishExpertsDto>;
-    private getUserMap;
-    private getDateRange;
+    private getDateRangeSql;
 }

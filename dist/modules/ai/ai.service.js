@@ -59,7 +59,7 @@ let AiService = AiService_1 = class AiService {
                 const jsonMatch = text.match(/\{[\s\S]*\}/);
                 if (!jsonMatch) {
                     this.logger.error(`AI response format error. Response length: ${text.length}, Response: ${text}`);
-                    throw new Error(`Invalid response format from AI. Response: ${text.substring(0, 200)}...`);
+                    throw new common_1.BadRequestException(`Invalid response format from AI. Response: ${text.substring(0, 200)}...`);
                 }
                 let analysis;
                 try {
@@ -67,7 +67,7 @@ let AiService = AiService_1 = class AiService {
                 }
                 catch (parseError) {
                     this.logger.error(`Failed to parse JSON: ${jsonMatch[0]}`);
-                    throw new Error(`AI returned invalid JSON format: ${parseError.message}`);
+                    throw new common_1.BadRequestException(`AI returned invalid JSON format: ${parseError.message}`);
                 }
                 const normalizedDishes = this.normalizeDishes(analysis);
                 const totalNutrition = this.calculateTotalNutrition(normalizedDishes);
@@ -94,7 +94,7 @@ let AiService = AiService_1 = class AiService {
                 lastError = error;
                 if (error instanceof SyntaxError) {
                     this.logger.error('Failed to parse AI response as JSON', error.stack);
-                    throw new Error('AI returned invalid JSON format');
+                    throw new common_1.BadRequestException('AI returned invalid JSON format');
                 }
                 if (this.isRetriableError(error) && attempt < MAX_RETRIES - 1) {
                     const delayMs = BASE_DELAY_MS * Math.pow(2, attempt);
@@ -130,7 +130,7 @@ let AiService = AiService_1 = class AiService {
                 }];
         }
         else {
-            throw new Error('Invalid AI response: neither dishes nor foodName found');
+            throw new common_1.BadRequestException('Invalid AI response: neither dishes nor foodName found');
         }
     }
     calculateTotalNutrition(dishes) {

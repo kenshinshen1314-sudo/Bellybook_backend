@@ -1,12 +1,20 @@
 /**
- * [INPUT]: 依赖 PrismaService 的数据库访问能力
+ * [INPUT]: 依赖 PrismaService 的数据库访问能力、CacheService 的缓存能力
  * [OUTPUT]: 对外提供菜品知识库的 CRUD 操作、统计更新
  * [POS]: dishes 模块的核心服务层，被 meals 模块消费
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ *
+ * [PERFORMANCE OPTIMIZED]
+ * - 添加 Redis 缓存层，TTL: 1小时（菜品数据变化频率低）
+ * - 使用 @Cacheable 装饰器自动管理缓存
  */
 import { Injectable, Logger } from '@nestjs/common';
 import { PrismaClient } from '@prisma/client';
 import { PrismaService } from '../../database/prisma.service';
+import { CacheService } from '../cache/cache.service';
+import { CacheStatsService } from '../cache/cache-stats.service';
+import { Cacheable } from '../cache/cache.decorator';
+import { CachePrefix, CacheTTL } from '../cache/cache.constants';
 import { DishInput } from '../ai/ai-types';
 
 /**
@@ -25,7 +33,11 @@ interface DishInputComplete extends DishInput {
 export class DishesService {
   private readonly logger = new Logger(DishesService.name);
 
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    public cacheService: CacheService,
+    public cacheStatsService: CacheStatsService,
+  ) {}
 
   // ============================================================
   // 公共方法 - 非事务版本
@@ -44,11 +56,12 @@ export class DishesService {
   }
 
   /**
-   * 获取热门菜品
+   * 获取热门菜品（带缓存）
    *
    * @param limit 返回数量限制
    * @param cuisine 菜系筛选（可选）
    */
+  @Cacheable(CachePrefix.DISH_INFO, ['limit', 'cuisine'], CacheTTL.LONG)
   async getPopularDishes(limit: number = 10, cuisine?: string) {
     return this.prisma.dish.findMany({
       where: cuisine ? { cuisine } : undefined,
@@ -58,10 +71,11 @@ export class DishesService {
   }
 
   /**
-   * 获取菜品详情
+   * 获取菜品详情（带缓存）
    *
    * @param name 菜品名称（唯一键）
    */
+  @Cacheable(CachePrefix.DISH_INFO, ['name'], CacheTTL.LONG)
   async getDishByName(name: string) {
     return this.prisma.dish.findUnique({
       where: { name },

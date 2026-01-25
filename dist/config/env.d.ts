@@ -19,8 +19,8 @@ declare const envSchema: z.ZodObject<{
     REDIS_DB: z.ZodDefault<z.ZodCoercedNumber<unknown>>;
     PORT: z.ZodDefault<z.ZodCoercedNumber<unknown>>;
     NODE_ENV: z.ZodDefault<z.ZodEnum<{
-        production: "production";
         development: "development";
+        production: "production";
         test: "test";
     }>>;
     API_PREFIX: z.ZodDefault<z.ZodString>;
@@ -30,10 +30,10 @@ declare const envSchema: z.ZodObject<{
     RATE_LIMIT_TTL: z.ZodDefault<z.ZodCoercedNumber<unknown>>;
     RATE_LIMIT_MAX: z.ZodDefault<z.ZodCoercedNumber<unknown>>;
     LOG_LEVEL: z.ZodDefault<z.ZodEnum<{
-        info: "info";
-        warn: "warn";
         error: "error";
         debug: "debug";
+        info: "info";
+        warn: "warn";
     }>>;
     LOG_FORMAT: z.ZodDefault<z.ZodEnum<{
         json: "json";
@@ -63,14 +63,14 @@ export declare const env: {
     REDIS_PASSWORD: string;
     REDIS_DB: number;
     PORT: number;
-    NODE_ENV: "production" | "development" | "test";
+    NODE_ENV: "development" | "production" | "test";
     API_PREFIX: string;
     CORS_ORIGIN: string;
     MAX_FILE_SIZE: number;
     ALLOWED_IMAGE_TYPES: string;
     RATE_LIMIT_TTL: number;
     RATE_LIMIT_MAX: number;
-    LOG_LEVEL: "info" | "warn" | "error" | "debug";
+    LOG_LEVEL: "error" | "debug" | "info" | "warn";
     LOG_FORMAT: "json" | "pretty";
     SWAGGER_ENABLED: boolean;
     SWAGGER_PATH: string;

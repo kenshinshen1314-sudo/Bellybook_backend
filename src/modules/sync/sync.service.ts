@@ -1,6 +1,17 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, NotFoundException, ConflictException } from '@nestjs/common';
 import { PrismaService } from '../../database/prisma.service';
-import { SyncPullResponseDto, SyncPushRequestDto, SyncPushResponseDto, SyncStatusResponseDto } from './dto/sync.dto';
+import {
+  SyncPullResponseDto,
+  SyncPushRequestDto,
+  SyncPushResponseDto,
+  SyncStatusResponseDto,
+  SyncPushPayload,
+  CuisineUnlockDto,
+  MealResponseDto,
+  ProfileResponseDto,
+  SettingsResponseDto
+} from './dto/sync.dto';
+import type { Meal, user_profiles, user_settings, cuisine_unlocks } from '@prisma/client';
 
 @Injectable()
 export class SyncService {
@@ -40,7 +51,7 @@ export class SyncService {
   async push(userId: string, dto: SyncPushRequestDto): Promise<SyncPushResponseDto> {
     const success: string[] = [];
     const failed: Array<{ clientId: string; error: string; code: string }> = [];
-    const conflicts: Array<{ clientId: string; type: string; serverVersion: any; clientVersion: any }> = [];
+    const conflicts: Array<{ clientId: string; type: string; serverVersion: number; clientVersion: number }> = [];
 
     for (const item of dto.items) {
       try {
@@ -77,11 +88,13 @@ export class SyncService {
               code: 'UNKNOWN_OPERATION',
             });
         }
-      } catch (error: any) {
+      } catch (error: unknown) {
+        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+        const errorCode = error instanceof Error && 'code' in error ? String(error.code) : 'SYNC_ERROR';
         failed.push({
           clientId: item.clientId,
-          error: error.message || 'Unknown error',
-          code: error.code || 'SYNC_ERROR',
+          error: errorMessage,
+          code: errorCode,
         });
       }
     }
@@ -118,28 +131,29 @@ export class SyncService {
     });
   }
 
-  private async handleCreateMeal(userId: string, payload: any): Promise<void> {
+  private async handleCreateMeal(userId: string, payload: SyncPushPayload): Promise<void> {
     await this.prisma.meal.create({
       data: {
         userId,
-        ...payload,
-      },
+        ...(payload as Record<string, unknown>) as Record<string, unknown>,
+      } as never,
     });
   }
 
-  private async handleUpdateMeal(userId: string, payload: any): Promise<void> {
-    const { id, version, ...data } = payload;
+  private async handleUpdateMeal(userId: string, payload: SyncPushPayload): Promise<void> {
+    const p = payload as { id: string; version: number; [key: string]: unknown };
+    const { id, version, ...data } = p;
 
     const meal = await this.prisma.meal.findFirst({
       where: { id, userId },
     });
 
     if (!meal) {
-      throw new Error('Meal not found');
+      throw new NotFoundException('Meal not found');
     }
 
     if (meal.version !== version) {
-      throw new Error('Version conflict');
+      throw new ConflictException('Version conflict');
     }
 
     await this.prisma.meal.update({
@@ -148,46 +162,55 @@ export class SyncService {
     });
   }
 
-  private async handleDeleteMeal(userId: string, payload: any): Promise<void> {
+  private async handleDeleteMeal(userId: string, payload: SyncPushPayload): Promise<void> {
+    const p = payload as { id: string };
     const meal = await this.prisma.meal.findFirst({
-      where: { id: payload.id, userId },
+      where: { id: p.id, userId },
     });
 
     if (!meal) {
-      throw new Error('Meal not found');
+      throw new NotFoundException('Meal not found');
     }
 
     await this.prisma.meal.update({
-      where: { id: payload.id },
+      where: { id: p.id },
       data: { deletedAt: new Date() },
     });
   }
 
-  private async handleUpdateProfile(userId: string, payload: any): Promise<void> {
+  private async handleUpdateProfile(userId: string, payload: SyncPushPayload): Promise<void> {
     await this.prisma.user_profiles.upsert({
       where: { userId },
-      create: { id: crypto.randomUUID(), userId, ...payload },
-      update: { ...payload },
+      create: {
+        id: crypto.randomUUID(),
+        userId,
+        ...(payload as Record<string, unknown>),
+      } as never,
+      update: (payload as Record<string, unknown>) as never,
     });
   }
 
-  private async handleUpdateSettings(userId: string, payload: any): Promise<void> {
+  private async handleUpdateSettings(userId: string, payload: SyncPushPayload): Promise<void> {
     await this.prisma.user_settings.upsert({
       where: { userId },
-      create: { id: crypto.randomUUID(), userId, ...payload },
-      update: { ...payload },
+      create: {
+        id: crypto.randomUUID(),
+        userId,
+        ...(payload as Record<string, unknown>),
+      } as never,
+      update: (payload as Record<string, unknown>) as never,
     });
   }
 
-  private mapToMealResponse(meal: any): any {
+  private mapToMealResponse(meal: Meal): MealResponseDto {
     return {
       id: meal.id,
       userId: meal.userId,
       imageUrl: meal.imageUrl,
-      thumbnailUrl: meal.thumbnailUrl,
-      analysis: meal.analysis,
+      thumbnailUrl: meal.thumbnailUrl ?? undefined,
+      analysis: meal.analysis as unknown as MealResponseDto['analysis'],
       mealType: meal.mealType,
-      notes: meal.notes,
+      notes: meal.notes ?? undefined,
       createdAt: meal.createdAt,
       updatedAt: meal.updatedAt,
       isSynced: meal.isSynced,
@@ -195,35 +218,37 @@ export class SyncService {
     };
   }
 
-  private mapToProfileResponse(profile: any): any {
+  private mapToProfileResponse(profile: user_profiles): ProfileResponseDto {
     return {
       id: profile.userId,
       username: '',
-      displayName: profile.displayName,
-      bio: profile.bio,
-      avatarUrl: profile.avatarUrl,
+      displayName: profile.displayName ?? undefined,
+      bio: profile.bio ?? undefined,
+      avatarUrl: profile.avatarUrl ?? undefined,
       createdAt: profile.createdAt,
     };
   }
 
-  private mapToSettingsResponse(settings: any): any {
+  private mapToSettingsResponse(settings: user_settings): SettingsResponseDto {
     return {
-      language: settings.language,
-      theme: settings.theme,
+      language: settings.language as 'ZH' | 'EN',
+      theme: settings.theme as 'LIGHT' | 'DARK' | 'AUTO',
       notificationsEnabled: settings.notificationsEnabled,
-      reminderTime: settings.reminderTime,
+      breakfastReminderTime: settings.breakfastReminderTime ?? undefined,
+      lunchReminderTime: settings.lunchReminderTime ?? undefined,
+      dinnerReminderTime: settings.dinnerReminderTime ?? undefined,
       hideRanking: settings.hideRanking,
     };
   }
 
-  private mapToCuisineUnlockResponse(unlock: any): any {
+  private mapToCuisineUnlockResponse(unlock: cuisine_unlocks): CuisineUnlockDto {
     return {
       cuisineName: unlock.cuisineName,
-      icon: unlock.cuisineIcon,
-      color: unlock.cuisineColor,
+      icon: unlock.cuisineIcon ?? undefined,
+      color: unlock.cuisineColor ?? undefined,
       firstMealAt: unlock.firstMealAt,
       mealCount: unlock.mealCount,
-      lastMealAt: unlock.lastMealAt,
+      lastMealAt: unlock.lastMealAt ?? undefined,
     };
   }
 }

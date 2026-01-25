@@ -12,12 +12,13 @@ const cuisines_controller_1 = require("./cuisines.controller");
 const cuisines_service_1 = require("./cuisines.service");
 const database_module_1 = require("../../database/database.module");
 const auth_module_1 = require("../auth/auth.module");
+const cache_module_1 = require("../cache/cache.module");
 let CuisinesModule = class CuisinesModule {
 };
 exports.CuisinesModule = CuisinesModule;
 exports.CuisinesModule = CuisinesModule = __decorate([
     (0, common_1.Module)({
-        imports: [database_module_1.DatabaseModule, auth_module_1.AuthModule],
+        imports: [database_module_1.DatabaseModule, auth_module_1.AuthModule, cache_module_1.CacheModuleClass],
         controllers: [cuisines_controller_1.CuisinesController],
         providers: [cuisines_service_1.CuisinesService],
         exports: [cuisines_service_1.CuisinesService],

@@ -1,6 +1,8 @@
 import { MealResponseDto } from '../../meals/dto/meal-response.dto';
 import { ProfileResponseDto } from '../../users/dto/user-response.dto';
 import { SettingsResponseDto } from '../../users/dto/user-response.dto';
+import { CreateMealDto } from '../../meals/dto/create-meal.dto';
+export type { MealResponseDto, ProfileResponseDto, SettingsResponseDto };
 export declare class CuisineUnlockDto {
     cuisineName: string;
     icon?: string;
@@ -17,10 +19,20 @@ export declare class SyncPullResponseDto {
     serverTime: string;
     hasMore: boolean;
 }
+export type SyncPushPayload = CreateMealDto | {
+    id: string;
+    version: number;
+    imageUrl?: string;
+    thumbnailUrl?: string;
+    analysis?: object;
+    notes?: string;
+} | {
+    id: string;
+} | ProfileResponseDto | SettingsResponseDto;
 export declare class SyncPushItem {
     id: string;
     type: 'CREATE_MEAL' | 'UPDATE_MEAL' | 'DELETE_MEAL' | 'UPDATE_PROFILE' | 'UPDATE_SETTINGS';
-    payload: any;
+    payload: SyncPushPayload;
     clientId: string;
     timestamp: string;
 }
@@ -35,8 +47,8 @@ export declare class SyncPushFailedItem {
 export declare class SyncPushConflictItem {
     clientId: string;
     type: string;
-    serverVersion: any;
-    clientVersion: any;
+    serverVersion: number;
+    clientVersion: number;
 }
 export declare class SyncPushResponseDto {
     success: string[];
@@ -54,5 +66,5 @@ export declare class ConflictResolutionDto {
     recordId: string;
     table: string;
     resolution: 'LAST_WRITE_WINS' | 'SERVER_WINS' | 'CLIENT_WINS' | 'MANUAL';
-    manualValue?: any;
+    manualValue?: Record<string, unknown>;
 }

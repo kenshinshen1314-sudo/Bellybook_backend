@@ -4,13 +4,16 @@ import { UpdateMealDto } from './dto/update-meal.dto';
 import { MealResponseDto, PaginatedMealsDto } from './dto/meal-response.dto';
 import { MealQueryDto } from './dto/meal-query.dto';
 import { DishesService } from '../dishes/dishes.service';
+import { CacheService } from '../cache/cache.service';
 import { AiAnalysis } from './meals.types';
 export declare class MealsService {
     private prisma;
     private dishesService;
+    cacheService: CacheService;
     private readonly logger;
-    constructor(prisma: PrismaService, dishesService: DishesService);
+    constructor(prisma: PrismaService, dishesService: DishesService, cacheService: CacheService);
     create(userId: string, dto: CreateMealDto): Promise<MealResponseDto>;
+    private invalidateRelatedCaches;
     createPending(userId: string, dto: CreateMealDto): Promise<MealResponseDto>;
     updateWithAnalysis(mealId: string, data: {
         analysis: AiAnalysis;

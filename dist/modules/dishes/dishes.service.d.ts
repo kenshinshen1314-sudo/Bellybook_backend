@@ -1,5 +1,7 @@
 import { PrismaClient } from '@prisma/client';
 import { PrismaService } from '../../database/prisma.service';
+import { CacheService } from '../cache/cache.service';
+import { CacheStatsService } from '../cache/cache-stats.service';
 import { DishInput } from '../ai/ai-types';
 interface DishInputComplete extends DishInput {
     nutrition: {
@@ -11,14 +13,16 @@ interface DishInputComplete extends DishInput {
 }
 export declare class DishesService {
     private prisma;
+    cacheService: CacheService;
+    cacheStatsService: CacheStatsService;
     private readonly logger;
-    constructor(prisma: PrismaService);
+    constructor(prisma: PrismaService, cacheService: CacheService, cacheStatsService: CacheStatsService);
     findOrCreateAndUpdate(input: DishInputComplete): Promise<{
         name: string;
+        description: string | null;
         id: number;
         createdAt: Date;
         updatedAt: Date;
-        description: string | null;
         cuisine: string;
         historicalOrigins: string | null;
         appearanceCount: number;
@@ -30,10 +34,10 @@ export declare class DishesService {
     }>;
     getPopularDishes(limit?: number, cuisine?: string): Promise<{
         name: string;
+        description: string | null;
         id: number;
         createdAt: Date;
         updatedAt: Date;
-        description: string | null;
         cuisine: string;
         historicalOrigins: string | null;
         appearanceCount: number;
@@ -45,10 +49,10 @@ export declare class DishesService {
     }[]>;
     getDishByName(name: string): Promise<{
         name: string;
+        description: string | null;
         id: number;
         createdAt: Date;
         updatedAt: Date;
-        description: string | null;
         cuisine: string;
         historicalOrigins: string | null;
         appearanceCount: number;
@@ -60,10 +64,10 @@ export declare class DishesService {
     } | null>;
     findOrCreateAndUpdateInTx(tx: Omit<PrismaClient, '$connect' | '$disconnect' | '$on' | '$transaction' | '$use' | '$extends'>, input: DishInputComplete): Promise<{
         name: string;
+        description: string | null;
         id: number;
         createdAt: Date;
         updatedAt: Date;
-        description: string | null;
         cuisine: string;
         historicalOrigins: string | null;
         appearanceCount: number;

@@ -12,10 +12,18 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.CuisinesService = void 0;
 const common_1 = require("@nestjs/common");
 const prisma_service_1 = require("../../database/prisma.service");
+const cache_service_1 = require("../cache/cache.service");
+const cache_stats_service_1 = require("../cache/cache-stats.service");
+const cache_decorator_1 = require("../cache/cache.decorator");
+const cache_constants_1 = require("../cache/cache.constants");
 let CuisinesService = class CuisinesService {
     prisma;
-    constructor(prisma) {
+    cacheService;
+    cacheStatsService;
+    constructor(prisma, cacheService, cacheStatsService) {
         this.prisma = prisma;
+        this.cacheService = cacheService;
+        this.cacheStatsService = cacheStatsService;
     }
     async findAll() {
         const cuisines = await this.prisma.cuisine_configs.findMany({
@@ -102,26 +110,77 @@ let CuisinesService = class CuisinesService {
             },
         };
     }
+    async getCuisineStats(userId, name) {
+        const unlock = await this.prisma.cuisine_unlocks.findUnique({
+            where: {
+                userId_cuisineName: { userId, cuisineName: name },
+            },
+        });
+        if (!unlock) {
+            throw new common_1.NotFoundException('Cuisine not found');
+        }
+        const dishUnlocks = await this.prisma.dish_unlocks.findMany({
+            where: {
+                userId,
+            },
+            select: {
+                dishName: true,
+            },
+        });
+        const dishNames = dishUnlocks.map(d => d.dishName);
+        const dishesInKnowledgeBase = await this.prisma.dish.findMany({
+            where: {
+                name: {
+                    in: dishNames,
+                },
+                cuisine: name,
+            },
+            select: {
+                name: true,
+            },
+        });
+        const uniqueDishCount = dishesInKnowledgeBase.length;
+        const meals = await this.prisma.meal.findMany({
+            where: {
+                userId,
+                cuisine: name,
+                deletedAt: null,
+            },
+            select: {
+                calories: true,
+            },
+        });
+        const totalCalories = meals.reduce((sum, meal) => sum + (meal.calories || 0), 0);
+        return {
+            cuisineName: name,
+            totalMeals: meals.length,
+            uniqueDishes: uniqueDishCount,
+            totalCalories,
+            averageCalories: meals.length > 0 ? totalCalories / meals.length : 0,
+            firstMealAt: unlock.firstMealAt,
+            lastMealAt: unlock.lastMealAt || unlock.firstMealAt,
+        };
+    }
     mapToCuisineConfig(cuisine) {
         return {
             name: cuisine.name,
-            nameEn: cuisine.nameEn,
-            nameZh: cuisine.nameZh,
-            category: cuisine.category,
+            nameEn: cuisine.nameEn ?? undefined,
+            nameZh: cuisine.nameZh ?? undefined,
+            category: cuisine.category ?? undefined,
             icon: cuisine.icon,
             color: cuisine.color,
-            description: cuisine.description,
+            description: cuisine.description ?? undefined,
             displayOrder: cuisine.displayOrder,
         };
     }
     mapToCuisineUnlock(unlock) {
         return {
             cuisineName: unlock.cuisineName,
-            icon: unlock.cuisineIcon,
-            color: unlock.cuisineColor,
+            icon: unlock.cuisineIcon ?? undefined,
+            color: unlock.cuisineColor ?? undefined,
             firstMealAt: unlock.firstMealAt,
             mealCount: unlock.mealCount,
-            lastMealAt: unlock.lastMealAt,
+            lastMealAt: unlock.lastMealAt ?? undefined,
         };
     }
     average(numbers) {
@@ -131,8 +190,28 @@ let CuisinesService = class CuisinesService {
     }
 };
 exports.CuisinesService = CuisinesService;
+__decorate([
+    (0, cache_decorator_1.Cacheable)(cache_constants_1.CachePrefix.CUISINE_CONFIGS, [], cache_constants_1.CacheTTL.DAILY),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", []),
+    __metadata("design:returntype", Promise)
+], CuisinesService.prototype, "findAll", null);
+__decorate([
+    (0, cache_decorator_1.Cacheable)(cache_constants_1.CachePrefix.CUISINE_UNLOCKS, ['userId'], cache_constants_1.CacheTTL.MEDIUM),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [String]),
+    __metadata("design:returntype", Promise)
+], CuisinesService.prototype, "findUnlocked", null);
+__decorate([
+    (0, cache_decorator_1.Cacheable)('cuisine:stats', ['userId'], cache_constants_1.CacheTTL.MEDIUM),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [String]),
+    __metadata("design:returntype", Promise)
+], CuisinesService.prototype, "getStats", null);
 exports.CuisinesService = CuisinesService = __decorate([
     (0, common_1.Injectable)(),
-    __metadata("design:paramtypes", [prisma_service_1.PrismaService])
+    __metadata("design:paramtypes", [prisma_service_1.PrismaService,
+        cache_service_1.CacheService,
+        cache_stats_service_1.CacheStatsService])
 ], CuisinesService);
 //# sourceMappingURL=cuisines.service.js.map

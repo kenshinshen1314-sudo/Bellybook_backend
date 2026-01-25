@@ -3,10 +3,14 @@
  * [OUTPUT]: 对外提供菜品专家榜查询逻辑
  * [POS]: ranking 模块的菜品专家榜查询服务
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ *
+ * [OPTIMIZATION NOTES]
+ * 优化前：dish_unlocks.findMany() + getUserMap() 两次查询
+ * 优化后：单次 SQL 查询完成聚合 + 用户 Join
  */
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../../../database/prisma.service';
-import { RankingPeriod } from '@prisma/client';
+import { Prisma, RankingPeriod } from '@prisma/client';
 import { DishExpertsDto, DishExpertEntry } from '../dto/ranking-response.dto';
 
 @Injectable()
@@ -14,100 +18,63 @@ export class DishExpertsQuery {
   constructor(private prisma: PrismaService) {}
 
   /**
-   * 获取菜品专家榜
+   * 获取菜品专家榜（优化版 - 单次 SQL 查询）
    * 统计每个用户的去重后菜品数量，倒序展示
    * 直接从 dish_unlocks 表获取统计数据
    */
   async execute(period: RankingPeriod): Promise<DishExpertsDto> {
-    const { startDate } = this.getDateRange(period);
+    const { startDate, startDateCondition } = this.getDateRangeSql(period);
 
-    // 直接从 dish_unlocks 表获取统计数据
-    const unlocks = await this.prisma.dish_unlocks.findMany({
-      where: startDate ? { firstMealAt: { gte: startDate } } : {},
-      select: {
-        userId: true,
-        dishName: true,
-        mealCount: true,
-      },
-    });
-
-    // 按 userId 分组统计
-    const userStats = new Map<string, {
-      count: number;
-      totalMeals: number;
+    // 单次 SQL 查询完成所有操作
+    const experts = await this.prisma.$queryRaw<Array<{
+      userId: string;
+      username: string;
+      avatarUrl: string | null;
+      dishCount: bigint;
+      totalMeals: bigint;
       dishes: string[];
-    }>();
-
-    for (const unlock of unlocks) {
-      const existing = userStats.get(unlock.userId);
-      if (!existing) {
-        userStats.set(unlock.userId, {
-          count: 1,
-          totalMeals: unlock.mealCount,
-          dishes: [unlock.dishName],
-        });
-      } else {
-        existing.count++;
-        existing.totalMeals += unlock.mealCount;
-        existing.dishes.push(unlock.dishName);
-      }
-    }
-
-    const userMap = await this.getUserMap();
-
-    const experts: DishExpertEntry[] = [];
-
-    for (const [userId, stats] of userStats.entries()) {
-      const user = userMap.get(userId);
-      if (!user) continue;
-
-      experts.push({
-        rank: 0,
-        userId,
-        username: user.username,
-        avatarUrl: user.avatarUrl,
-        dishCount: stats.count,
-        mealCount: stats.totalMeals,
-        dishes: stats.dishes.slice(0, 10),
-        cuisines: [], // 可选：查询菜系
-      });
-    }
-
-    experts.sort((a, b) => b.dishCount - a.dishCount);
-    experts.forEach((e, index) => { e.rank = index + 1; });
+    }>>`
+      SELECT
+        u.id as "userId",
+        u.username,
+        u."avatarUrl",
+        COUNT(du."dishName") as "dishCount",
+        SUM(du."mealCount") as "totalMeals",
+        ARRAY_AGG(du."dishName" ORDER BY du."mealCount" DESC) as "dishes"
+      FROM users u
+      INNER JOIN dish_unlocks du ON du."userId" = u.id
+        ${startDateCondition}
+      LEFT JOIN user_settings us ON us."userId" = u.id
+      WHERE u."deletedAt" IS NULL
+        AND (us.id IS NULL OR us."hideRanking" = false)
+      GROUP BY u.id, u.username, u."avatarUrl"
+      HAVING COUNT(du."dishName") > 0
+      ORDER BY "dishCount" DESC
+      LIMIT 100
+    `;
 
     return {
       period,
-      experts: experts.slice(0, 100),
+      experts: experts.map((e, index) => ({
+        rank: index + 1,
+        userId: e.userId,
+        username: e.username,
+        avatarUrl: e.avatarUrl,
+        dishCount: Number(e.dishCount),
+        mealCount: Number(e.totalMeals),
+        dishes: (e.dishes || []).slice(0, 10),
+        cuisines: [], // 可选：查询菜系
+      })),
     };
   }
 
   /**
-   * 获取用户映射（愿意参与排行榜的用户）
+   * 根据时段获取开始日期和 SQL 条件
    */
-  private async getUserMap(): Promise<Map<string, { username: string; avatarUrl: string | null }>> {
-    const users = await this.prisma.user.findMany({
-      where: {
-        deletedAt: null,
-        OR: [
-          { user_settings: { is: null } },
-          { user_settings: { hideRanking: false } },
-        ],
-      },
-      select: {
-        id: true,
-        username: true,
-        avatarUrl: true,
-      },
-    });
-
-    return new Map(users.map(u => [u.id, { username: u.username, avatarUrl: u.avatarUrl }]));
-  }
-
-  /**
-   * 根据时段获取开始日期
-   */
-  private getDateRange(period: RankingPeriod): { startDate?: Date } {
+  private getDateRangeSql(period: RankingPeriod): {
+    startDate?: Date;
+    startDateCondition: Prisma.Sql;
+  } {
     const now = new Date();
     let startDate: Date | undefined;
 
@@ -130,6 +97,10 @@ export class DishExpertsQuery {
         break;
     }
 
-    return { startDate };
+    const startDateCondition = startDate
+      ? Prisma.sql`AND du."firstMealAt" >= ${startDate}`
+      : Prisma.empty;
+
+    return { startDate, startDateCondition };
   }
 }

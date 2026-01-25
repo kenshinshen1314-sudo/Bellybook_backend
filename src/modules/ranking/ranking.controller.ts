@@ -2,8 +2,9 @@ import { Controller, Get, Query, UseGuards } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiQuery } from '@nestjs/swagger';
 import { RankingOptimizedService } from './ranking-optimized.service';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
-import { CuisineMastersQueryDto, LeaderboardQueryDto, RankingPeriod } from './dto/ranking-query.dto';
+import { CuisineMastersQueryDto, LeaderboardQueryDto, RankingPeriod, PaginatedQueryDto } from './dto/ranking-query.dto';
 import { CuisineMastersDto, LeaderboardDto, RankingStatsDto, GourmetsDto, DishExpertsDto, CuisineExpertDetailDto, AllUsersDishesDto, UserUnlockedDishesDto } from './dto/ranking-response.dto';
+import { Cache, CacheTTL } from '../../common/interceptors/cache.interceptor';
 
 @ApiTags('Ranking')
 @ApiBearerAuth('bearer')
@@ -45,6 +46,7 @@ export class RankingController {
     description: '获取成功',
     type: CuisineMastersDto,
   })
+  @Cache(CacheTTL.FIVE_MINUTES) // 排行榜数据，缓存5分钟
   async getCuisineMasters(
     @Query('cuisineName') cuisineName?: string,
     @Query('period') period: RankingPeriod = RankingPeriod.ALL_TIME,
@@ -85,6 +87,7 @@ export class RankingController {
     description: '获取成功',
     type: LeaderboardDto,
   })
+  @Cache(CacheTTL.FIVE_MINUTES) // 排行榜数据，缓存5分钟
   async getLeaderboard(
     @Query('period') period: RankingPeriod = RankingPeriod.ALL_TIME,
     @Query('tier') tier?: string,
@@ -117,6 +120,7 @@ export class RankingController {
     description: '获取成功',
     type: RankingStatsDto,
   })
+  @Cache(CacheTTL.FIVE_MINUTES) // 排行榜统计数据，缓存5分钟
   async getRankingStats(
     @Query('period') period: RankingPeriod = RankingPeriod.ALL_TIME,
   ): Promise<RankingStatsDto> {
@@ -149,6 +153,7 @@ export class RankingController {
     description: '获取成功',
     type: GourmetsDto,
   })
+  @Cache(CacheTTL.FIVE_MINUTES) // 排行榜数据，缓存5分钟
   async getGourmets(
     @Query('period') period: RankingPeriod = RankingPeriod.ALL_TIME,
   ): Promise<GourmetsDto> {
@@ -181,6 +186,7 @@ export class RankingController {
     description: '获取成功',
     type: DishExpertsDto,
   })
+  @Cache(CacheTTL.FIVE_MINUTES) // 排行榜数据，缓存5分钟
   async getDishExperts(
     @Query('period') period: RankingPeriod = RankingPeriod.ALL_TIME,
   ): Promise<DishExpertsDto> {
@@ -200,7 +206,7 @@ export class RankingController {
   @Get('cuisine-expert-detail')
   @ApiOperation({
     summary: '获取菜系专家详情',
-    description: '展示指定用户在指定菜系下的所有菜品记录',
+    description: '展示指定用户在指定菜系下的所有菜品记录（支持分页）',
   })
   @ApiQuery({
     name: 'userId',
@@ -220,6 +226,18 @@ export class RankingController {
     required: false,
     enum: ['WEEKLY', 'MONTHLY', 'YEARLY', 'ALL_TIME'],
     example: 'ALL_TIME',
+  })
+  @ApiQuery({
+    name: 'limit',
+    description: '每页条目数（1-100）',
+    required: false,
+    example: 50,
+  })
+  @ApiQuery({
+    name: 'offset',
+    description: '偏移量',
+    required: false,
+    example: 0,
   })
   @ApiResponse({
     status: 200,
@@ -241,8 +259,13 @@ export class RankingController {
     @Query('userId') userId: string,
     @Query('cuisineName') cuisineName: string,
     @Query('period') period: RankingPeriod = RankingPeriod.ALL_TIME,
+    @Query('limit') limit?: number,
+    @Query('offset') offset?: number,
   ): Promise<CuisineExpertDetailDto> {
-    return this.rankingService.getCuisineExpertDetail(userId, cuisineName, period);
+    // 应用默认值和限制
+    const validatedLimit = Math.min(Math.max(limit || 50, 1), 100);
+    const validatedOffset = Math.max(offset || 0, 0);
+    return this.rankingService.getCuisineExpertDetail(userId, cuisineName, period, validatedLimit, validatedOffset);
   }
 
   /**
@@ -288,13 +311,25 @@ export class RankingController {
   @Get('user-unlocked-dishes')
   @ApiOperation({
     summary: '获取用户已解锁的菜肴',
-    description: '展示用户所有已解锁的菜肴列表',
+    description: '展示用户所有已解锁的菜肴列表（支持分页）',
   })
   @ApiQuery({
     name: 'userId',
     description: '用户 ID',
     required: true,
     example: 'cm1234567890',
+  })
+  @ApiQuery({
+    name: 'limit',
+    description: '每页条目数（1-100）',
+    required: false,
+    example: 50,
+  })
+  @ApiQuery({
+    name: 'offset',
+    description: '偏移量',
+    required: false,
+    example: 0,
   })
   @ApiResponse({
     status: 200,
@@ -314,7 +349,12 @@ export class RankingController {
   })
   async getUserUnlockedDishes(
     @Query('userId') userId: string,
+    @Query('limit') limit?: number,
+    @Query('offset') offset?: number,
   ): Promise<UserUnlockedDishesDto> {
-    return this.rankingService.getUserUnlockedDishes(userId);
+    // 应用默认值和限制
+    const validatedLimit = Math.min(Math.max(limit || 50, 1), 100);
+    const validatedOffset = Math.max(offset || 0, 0);
+    return this.rankingService.getUserUnlockedDishes(userId, validatedLimit, validatedOffset);
   }
 }

@@ -13,12 +13,13 @@ const meals_service_1 = require("./meals.service");
 const database_module_1 = require("../../database/database.module");
 const auth_module_1 = require("../auth/auth.module");
 const dishes_module_1 = require("../dishes/dishes.module");
+const cache_module_1 = require("../cache/cache.module");
 let MealsModule = class MealsModule {
 };
 exports.MealsModule = MealsModule;
 exports.MealsModule = MealsModule = __decorate([
     (0, common_1.Module)({
-        imports: [database_module_1.DatabaseModule, auth_module_1.AuthModule, dishes_module_1.DishesModule],
+        imports: [database_module_1.DatabaseModule, auth_module_1.AuthModule, dishes_module_1.DishesModule, cache_module_1.CacheModuleClass],
         controllers: [meals_controller_1.MealsController],
         providers: [meals_service_1.MealsService],
         exports: [meals_service_1.MealsService],

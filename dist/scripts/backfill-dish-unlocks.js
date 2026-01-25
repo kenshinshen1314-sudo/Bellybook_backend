@@ -1,10 +1,12 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 const client_1 = require("@prisma/client");
+const common_1 = require("@nestjs/common");
 const prisma = new client_1.PrismaClient();
+const logger = new common_1.Logger('BackfillDishUnlocks');
 async function main() {
-    console.log('Starting backfill of dish_unlocks...');
-    console.log('Fetching all meals...');
+    logger.log('Starting backfill of dish_unlocks...');
+    logger.log('Fetching all meals...');
     const meals = await prisma.meal.findMany({
         where: {
             deletedAt: null,
@@ -18,7 +20,7 @@ async function main() {
             createdAt: 'asc',
         },
     });
-    console.log(`Found ${meals.length} meals. Processing...`);
+    logger.log(`Found ${meals.length} meals. Processing...`);
     const statsMap = new Map();
     for (const meal of meals) {
         if (!meal.foodName)
@@ -41,7 +43,7 @@ async function main() {
             }
         }
     }
-    console.log(`Identified ${statsMap.size} unique user-dish pairs.`);
+    logger.log(`Identified ${statsMap.size} unique user-dish pairs.`);
     let processed = 0;
     const total = statsMap.size;
     for (const stats of statsMap.values()) {
@@ -67,14 +69,14 @@ async function main() {
         });
         processed++;
         if (processed % 50 === 0) {
-            console.log(`Processed ${processed}/${total}...`);
+            logger.log(`Processed ${processed}/${total}...`);
         }
     }
-    console.log('Backfill completed successfully!');
+    logger.log('Backfill completed successfully!');
 }
 main()
     .catch((e) => {
-    console.error(e);
+    logger.error(e);
     process.exit(1);
 })
     .finally(async () => {

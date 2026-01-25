@@ -3,6 +3,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.DEFAULT_API_TAGS = void 0;
 exports.createSwaggerConfig = createSwaggerConfig;
 exports.setupSwagger = setupSwagger;
+const common_1 = require("@nestjs/common");
 const swagger_1 = require("@nestjs/swagger");
 const env_1 = require("../env");
 exports.DEFAULT_API_TAGS = [
@@ -105,6 +106,7 @@ function setupSwagger(app, document) {
       .swagger-ui .info .link { display: none; }
     `,
     });
-    console.log(`📚 Swagger documentation available at: http://localhost:${env_1.env.PORT}/${env_1.env.SWAGGER_PATH}`);
+    const logger = new common_1.Logger('Swagger');
+    logger.log(`📚 Swagger documentation available at: http://localhost:${env_1.env.PORT}/${env_1.env.SWAGGER_PATH}`);
 }
 //# sourceMappingURL=swagger.config.js.map

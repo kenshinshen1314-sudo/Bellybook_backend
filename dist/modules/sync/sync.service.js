@@ -81,10 +81,12 @@ let SyncService = class SyncService {
                 }
             }
             catch (error) {
+                const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+                const errorCode = error instanceof Error && 'code' in error ? String(error.code) : 'SYNC_ERROR';
                 failed.push({
                     clientId: item.clientId,
-                    error: error.message || 'Unknown error',
-                    code: error.code || 'SYNC_ERROR',
+                    error: errorMessage,
+                    code: errorCode,
                 });
             }
         }
@@ -124,15 +126,16 @@ let SyncService = class SyncService {
         });
     }
     async handleUpdateMeal(userId, payload) {
-        const { id, version, ...data } = payload;
+        const p = payload;
+        const { id, version, ...data } = p;
         const meal = await this.prisma.meal.findFirst({
             where: { id, userId },
         });
         if (!meal) {
-            throw new Error('Meal not found');
+            throw new common_1.NotFoundException('Meal not found');
         }
         if (meal.version !== version) {
-            throw new Error('Version conflict');
+            throw new common_1.ConflictException('Version conflict');
         }
         await this.prisma.meal.update({
             where: { id },
@@ -140,29 +143,38 @@ let SyncService = class SyncService {
         });
     }
     async handleDeleteMeal(userId, payload) {
+        const p = payload;
         const meal = await this.prisma.meal.findFirst({
-            where: { id: payload.id, userId },
+            where: { id: p.id, userId },
         });
         if (!meal) {
-            throw new Error('Meal not found');
+            throw new common_1.NotFoundException('Meal not found');
         }
         await this.prisma.meal.update({
-            where: { id: payload.id },
+            where: { id: p.id },
             data: { deletedAt: new Date() },
         });
     }
     async handleUpdateProfile(userId, payload) {
         await this.prisma.user_profiles.upsert({
             where: { userId },
-            create: { id: crypto.randomUUID(), userId, ...payload },
-            update: { ...payload },
+            create: {
+                id: crypto.randomUUID(),
+                userId,
+                ...payload,
+            },
+            update: payload,
         });
     }
     async handleUpdateSettings(userId, payload) {
         await this.prisma.user_settings.upsert({
             where: { userId },
-            create: { id: crypto.randomUUID(), userId, ...payload },
-            update: { ...payload },
+            create: {
+                id: crypto.randomUUID(),
+                userId,
+                ...payload,
+            },
+            update: payload,
         });
     }
     mapToMealResponse(meal) {
@@ -170,10 +182,10 @@ let SyncService = class SyncService {
             id: meal.id,
             userId: meal.userId,
             imageUrl: meal.imageUrl,
-            thumbnailUrl: meal.thumbnailUrl,
+            thumbnailUrl: meal.thumbnailUrl ?? undefined,
             analysis: meal.analysis,
             mealType: meal.mealType,
-            notes: meal.notes,
+            notes: meal.notes ?? undefined,
             createdAt: meal.createdAt,
             updatedAt: meal.updatedAt,
             isSynced: meal.isSynced,
@@ -184,9 +196,9 @@ let SyncService = class SyncService {
         return {
             id: profile.userId,
             username: '',
-            displayName: profile.displayName,
-            bio: profile.bio,
-            avatarUrl: profile.avatarUrl,
+            displayName: profile.displayName ?? undefined,
+            bio: profile.bio ?? undefined,
+            avatarUrl: profile.avatarUrl ?? undefined,
             createdAt: profile.createdAt,
         };
     }
@@ -195,18 +207,20 @@ let SyncService = class SyncService {
             language: settings.language,
             theme: settings.theme,
             notificationsEnabled: settings.notificationsEnabled,
-            reminderTime: settings.reminderTime,
+            breakfastReminderTime: settings.breakfastReminderTime ?? undefined,
+            lunchReminderTime: settings.lunchReminderTime ?? undefined,
+            dinnerReminderTime: settings.dinnerReminderTime ?? undefined,
             hideRanking: settings.hideRanking,
         };
     }
     mapToCuisineUnlockResponse(unlock) {
         return {
             cuisineName: unlock.cuisineName,
-            icon: unlock.cuisineIcon,
-            color: unlock.cuisineColor,
+            icon: unlock.cuisineIcon ?? undefined,
+            color: unlock.cuisineColor ?? undefined,
             firstMealAt: unlock.firstMealAt,
             mealCount: unlock.mealCount,
-            lastMealAt: unlock.lastMealAt,
+            lastMealAt: unlock.lastMealAt ?? undefined,
         };
     }
 };

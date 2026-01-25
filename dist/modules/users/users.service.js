@@ -13,11 +13,21 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.UsersService = void 0;
 const common_1 = require("@nestjs/common");
 const prisma_service_1 = require("../../database/prisma.service");
+const update_profile_dto_1 = require("./dto/update-profile.dto");
+const update_settings_dto_1 = require("./dto/update-settings.dto");
+const cache_service_1 = require("../cache/cache.service");
+const cache_stats_service_1 = require("../cache/cache-stats.service");
+const cache_decorator_1 = require("../cache/cache.decorator");
+const cache_constants_1 = require("../cache/cache.constants");
 let UsersService = UsersService_1 = class UsersService {
     prisma;
+    cacheService;
+    cacheStatsService;
     logger = new common_1.Logger(UsersService_1.name);
-    constructor(prisma) {
+    constructor(prisma, cacheService, cacheStatsService) {
         this.prisma = prisma;
+        this.cacheService = cacheService;
+        this.cacheStatsService = cacheStatsService;
     }
     async checkAnalysisQuota(userId) {
         const user = await this.prisma.user.findUnique({
@@ -132,13 +142,17 @@ let UsersService = UsersService_1 = class UsersService {
         return this.mapToSettingsResponse(user);
     }
     async getStats(userId) {
+        const cacheKey = `${cache_constants_1.CachePrefix.USER}:${userId}:stats`;
+        const cached = await this.cacheService.get(cacheKey);
+        if (cached)
+            return cached;
         const user = await this.prisma.user.findUnique({
             where: { id: userId },
         });
         if (!user) {
             throw new common_1.NotFoundException('User not found');
         }
-        const [totalMeals, totalCuisines, mealsByCuisine] = await Promise.all([
+        const [totalMeals, totalCuisines, mealsByCuisine, periodCounts] = await Promise.all([
             this.prisma.meal.count({ where: { userId, deletedAt: null } }),
             this.prisma.cuisine_unlocks.count({ where: { userId } }),
             this.prisma.cuisine_unlocks.findMany({
@@ -146,44 +160,33 @@ let UsersService = UsersService_1 = class UsersService {
                 orderBy: { mealCount: 'desc' },
                 take: 5,
             }),
-        ]);
-        const today = this.getStartOfDay();
-        const weekAgo = new Date(today);
-        weekAgo.setDate(weekAgo.getDate() - 7);
-        const monthAgo = new Date(today);
-        monthAgo.setDate(monthAgo.getDate() - 30);
-        const [thisWeekMeals, thisMonthMeals] = await Promise.all([
-            this.prisma.meal.count({
-                where: {
-                    userId,
-                    createdAt: { gte: weekAgo },
-                    deletedAt: null,
-                },
-            }),
-            this.prisma.meal.count({
-                where: {
-                    userId,
-                    createdAt: { gte: monthAgo },
-                    deletedAt: null,
-                },
-            }),
+            this.prisma.$queryRaw `
+        SELECT
+          COUNT(*) FILTER (WHERE "createdAt" >= NOW() - INTERVAL '7 days') as week_count,
+          COUNT(*) FILTER (WHERE "createdAt" >= NOW() - INTERVAL '30 days') as month_count
+        FROM meals
+        WHERE "userId" = ${userId}
+          AND "deletedAt" IS NULL
+      `,
         ]);
         const [currentStreak, longestStreak] = await Promise.all([
-            this.calculateStreak(userId),
-            this.calculateLongestStreak(userId),
+            this.calculateStreakOptimized(userId),
+            this.calculateLongestStreakOptimized(userId),
         ]);
-        return {
+        const result = {
             totalMeals,
             totalCuisines,
             currentStreak,
             longestStreak,
-            thisWeekMeals,
-            thisMonthMeals,
+            thisWeekMeals: Number(periodCounts[0]?.week_count || 0),
+            thisMonthMeals: Number(periodCounts[0]?.month_count || 0),
             favoriteCuisines: mealsByCuisine.map(c => ({
                 name: c.cuisineName,
                 count: c.mealCount,
             })),
         };
+        await this.cacheService.set(cacheKey, result, cache_constants_1.CacheTTL.LONG);
+        return result;
     }
     async deleteAccount(userId) {
         await this.prisma.user.update({
@@ -219,6 +222,50 @@ let UsersService = UsersService_1 = class UsersService {
         const today = new Date();
         today.setHours(0, 0, 0, 0);
         return today;
+    }
+    async calculateStreakOptimized(userId) {
+        const result = await this.prisma.$queryRaw `
+      WITH date_series AS (
+        SELECT DISTINCT DATE("createdAt") as date
+        FROM meals
+        WHERE "userId" = ${userId}
+          AND "deletedAt" IS NULL
+          AND "createdAt" >= NOW() - INTERVAL '365 days'
+        ORDER BY date DESC
+        LIMIT 365
+      ),
+      streak_groups AS (
+        SELECT date,
+          date - (ROW_NUMBER() OVER (ORDER BY date DESC) || INTERVAL '1 day') as grp
+        FROM date_series
+      )
+      SELECT COUNT(*) as streak
+      FROM streak_groups
+      WHERE grp = (SELECT grp FROM streak_groups ORDER BY date DESC LIMIT 1)
+    `;
+        return result[0] ? Number(result[0].streak) : 0;
+    }
+    async calculateLongestStreakOptimized(userId) {
+        const result = await this.prisma.$queryRaw `
+      WITH date_series AS (
+        SELECT DISTINCT DATE("createdAt") as date
+        FROM meals
+        WHERE "userId" = ${userId}
+          AND "deletedAt" IS NULL
+        ORDER BY date ASC
+      ),
+      streak_groups AS (
+        SELECT date,
+          date - (ROW_NUMBER() OVER (ORDER BY date ASC) || INTERVAL '1 day') as grp
+        FROM date_series
+      )
+      SELECT MAX(COUNT(*)) as longest_streak
+      FROM streak_groups
+      GROUP BY grp
+      ORDER BY longest_streak DESC
+      LIMIT 1
+    `;
+        return result[0] ? Number(result[0].longest_streak) : 0;
     }
     async calculateStreak(userId) {
         const meals = await this.prisma.meal.findMany({
@@ -276,28 +323,54 @@ let UsersService = UsersService_1 = class UsersService {
         return {
             id: user.id,
             username: user.username,
-            displayName: user.user_profiles?.displayName || user.displayName || null,
-            bio: user.user_profiles?.bio || null,
-            avatarUrl: user.user_profiles?.avatarUrl || user.avatarUrl || null,
+            displayName: user.user_profiles?.displayName ?? undefined,
+            bio: user.user_profiles?.bio ?? undefined,
+            avatarUrl: user.user_profiles?.avatarUrl ?? undefined,
             createdAt: user.createdAt,
         };
     }
     mapToSettingsResponse(user) {
-        const settings = user.user_settings || {};
+        const settings = user.user_settings;
         return {
-            language: settings.language || 'ZH',
-            theme: settings.theme || 'AUTO',
-            notificationsEnabled: settings.notificationsEnabled ?? true,
-            breakfastReminderTime: settings.breakfastReminderTime || null,
-            lunchReminderTime: settings.lunchReminderTime || null,
-            dinnerReminderTime: settings.dinnerReminderTime || null,
-            hideRanking: settings.hideRanking || false,
+            language: settings?.language ?? 'ZH',
+            theme: settings?.theme ?? 'AUTO',
+            notificationsEnabled: settings?.notificationsEnabled ?? true,
+            breakfastReminderTime: settings?.breakfastReminderTime ?? undefined,
+            lunchReminderTime: settings?.lunchReminderTime ?? undefined,
+            dinnerReminderTime: settings?.dinnerReminderTime ?? undefined,
+            hideRanking: settings?.hideRanking ?? false,
         };
     }
 };
 exports.UsersService = UsersService;
+__decorate([
+    (0, cache_decorator_1.Cacheable)(cache_constants_1.CachePrefix.USER_PROFILE, ['userId'], cache_constants_1.CacheTTL.LONG),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [String]),
+    __metadata("design:returntype", Promise)
+], UsersService.prototype, "getProfile", null);
+__decorate([
+    (0, cache_decorator_1.CacheInvalidate)(cache_constants_1.CachePrefix.USER_PROFILE, ['userId'], `${cache_constants_1.CachePrefix.USER_PROFILE}:*`),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [String, update_profile_dto_1.UpdateProfileDto]),
+    __metadata("design:returntype", Promise)
+], UsersService.prototype, "updateProfile", null);
+__decorate([
+    (0, cache_decorator_1.Cacheable)(cache_constants_1.CachePrefix.USER_SETTINGS, ['userId'], cache_constants_1.CacheTTL.LONG),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [String]),
+    __metadata("design:returntype", Promise)
+], UsersService.prototype, "getSettings", null);
+__decorate([
+    (0, cache_decorator_1.CacheInvalidate)(cache_constants_1.CachePrefix.USER_SETTINGS, ['userId'], `${cache_constants_1.CachePrefix.USER_SETTINGS}:*`),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [String, update_settings_dto_1.UpdateSettingsDto]),
+    __metadata("design:returntype", Promise)
+], UsersService.prototype, "updateSettings", null);
 exports.UsersService = UsersService = UsersService_1 = __decorate([
     (0, common_1.Injectable)(),
-    __metadata("design:paramtypes", [prisma_service_1.PrismaService])
+    __metadata("design:paramtypes", [prisma_service_1.PrismaService,
+        cache_service_1.CacheService,
+        cache_stats_service_1.CacheStatsService])
 ], UsersService);
 //# sourceMappingURL=users.service.js.map

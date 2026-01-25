@@ -1,14 +1,50 @@
+/**
+ * [INPUT]: 依赖 PrismaService 的数据库访问、DishesService 的菜品知识库操作、DateUtil 的日期处理
+ * [OUTPUT]: 对外提供餐食 CRUD、今日餐食、按日期查询、按菜品查询
+ * [POS]: meals 模块的核心服务层，被 storage、sync 模块消费
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 import { Test, TestingModule } from '@nestjs/testing';
-import { NotFoundException, ForbiddenException } from '@nestjs/common';
 import { MealsService } from './meals.service';
 import { PrismaService } from '../../database/prisma.service';
 import { DishesService } from '../dishes/dishes.service';
+import { CacheService } from '../cache/cache.service';
 import { CreateMealDto } from './dto/create-meal.dto';
 import { UpdateMealDto } from './dto/update-meal.dto';
+import { MealType } from '@prisma/client';
 
 describe('MealsService', () => {
   let service: MealsService;
-  let prismaService: PrismaService;
+  let prismaService: jest.Mocked<PrismaService>;
+
+  const mockTx = {
+    meal: {
+      create: jest.fn(),
+    },
+    dish: {
+      findUnique: jest.fn(),
+      create: jest.fn(),
+      update: jest.fn(),
+    },
+    cuisine_unlocks: {
+      findUnique: jest.fn(),
+      update: jest.fn(),
+      create: jest.fn(),
+    },
+    cuisine_configs: {
+      findUnique: jest.fn(),
+    },
+    daily_nutritions: {
+      findUnique: jest.fn(),
+      update: jest.fn(),
+      create: jest.fn(),
+    },
+    dish_unlocks: {
+      findUnique: jest.fn(),
+      create: jest.fn(),
+      update: jest.fn(),
+    },
+  };
 
   const mockPrismaService = {
     meal: {
@@ -41,10 +77,18 @@ describe('MealsService', () => {
       create: jest.fn(),
       update: jest.fn(),
     },
+    runTransaction: jest.fn(),
   };
 
   const mockDishesService = {
-    findOrCreateAndUpdate: jest.fn(),
+    findOrCreateAndUpdateInTx: jest.fn(),
+  };
+
+  const mockCacheService = {
+    get: jest.fn(),
+    set: jest.fn(),
+    del: jest.fn(),
+    delPattern: jest.fn(),
   };
 
   beforeEach(async () => {
@@ -59,20 +103,25 @@ describe('MealsService', () => {
           provide: DishesService,
           useValue: mockDishesService,
         },
+        {
+          provide: CacheService,
+          useValue: mockCacheService,
+        },
       ],
     }).compile();
 
     service = module.get<MealsService>(MealsService);
-    prismaService = module.get<PrismaService>(PrismaService);
+    prismaService = module.get(PrismaService);
 
     jest.clearAllMocks();
   });
 
   describe('create', () => {
-    it('should create a new meal', async () => {
+    it('should create a new meal with transaction', async () => {
       const userId = 'userId123';
       const dto: CreateMealDto = {
         imageUrl: 'https://example.com/image.jpg',
+        thumbnailUrl: 'https://example.com/thumb.jpg',
         analysis: {
           dishes: [{
             foodName: 'Test Food',
@@ -91,52 +140,62 @@ describe('MealsService', () => {
             carbohydrates: 60,
           },
           foodPrice: 50,
+          description: 'Test description',
         },
+        mealType: MealType.LUNCH,
       };
 
-      const meal = {
+      const mockMeal = {
         id: 'meal123',
         userId,
         imageUrl: dto.imageUrl,
-        thumbnailUrl: null,
-        analysis: dto.analysis,
+        thumbnailUrl: dto.thumbnailUrl,
         foodName: 'Test Food',
         cuisine: 'Chinese',
-        calories: dto.analysis.nutrition.calories,
-        protein: dto.analysis.nutrition.protein,
-        fat: dto.analysis.nutrition.fat,
-        carbohydrates: dto.analysis.nutrition.carbohydrates,
+        mealType: MealType.LUNCH,
+        calories: 500,
+        protein: 20,
+        fat: 15,
+        carbohydrates: 60,
         price: 50,
-        mealType: 'SNACK' as const,
-        notes: null,
-        isSynced: false,
-        version: 1,
         createdAt: new Date(),
         updatedAt: new Date(),
+        analyzedAt: new Date(),
+        isSynced: false,
+        version: 1,
       };
 
-      mockDishesService.findOrCreateAndUpdate.mockResolvedValue({ id: 1, name: 'Test Food' });
-      mockPrismaService.meal.create.mockResolvedValue(meal);
-      mockPrismaService.cuisine_unlocks.findUnique.mockResolvedValue(null);
-      mockPrismaService.cuisine_configs.findUnique.mockResolvedValue({
-        icon: '🍜',
-        color: '#FF0000',
+      const mockDish = {
+        id: 1,
+        name: 'Test Food',
+        cuisine: 'Chinese',
+      };
+
+      // Mock runTransaction to execute the callback
+      (prismaService.runTransaction as jest.Mock).mockImplementation(async (callback) => {
+        return callback(mockTx as any);
       });
-      mockPrismaService.cuisine_unlocks.create.mockResolvedValue({});
-      mockPrismaService.daily_nutritions.findUnique.mockResolvedValue(null);
-      mockPrismaService.daily_nutritions.create.mockResolvedValue({});
+
+      mockDishesService.findOrCreateAndUpdateInTx.mockResolvedValue(mockDish);
+      mockTx.meal.create.mockResolvedValue(mockMeal);
+      mockTx.cuisine_unlocks.findUnique.mockResolvedValue(null);
+      mockTx.cuisine_configs.findUnique.mockResolvedValue({ icon: '🍜', color: '#FF5722' });
+      mockTx.daily_nutritions.findUnique.mockResolvedValue(null);
+      mockTx.dish_unlocks.findUnique.mockResolvedValue(null);
 
       const result = await service.create(userId, dto);
 
-      expect(result.id).toBe('meal123');
-      expect(result.analysis).toBeDefined();
-      expect(mockPrismaService.meal.create).toHaveBeenCalled();
+      expect(prismaService.runTransaction).toHaveBeenCalled();
+      expect(mockDishesService.findOrCreateAndUpdateInTx).toHaveBeenCalled();
+      expect(mockTx.meal.create).toHaveBeenCalled();
+      expect(result).toHaveProperty('id', 'meal123');
     });
 
     it('should update existing cuisine unlock', async () => {
       const userId = 'userId123';
       const dto: CreateMealDto = {
         imageUrl: 'https://example.com/image.jpg',
+        thumbnailUrl: 'https://example.com/thumb.jpg',
         analysis: {
           dishes: [{
             foodName: 'Test Food',
@@ -154,119 +213,114 @@ describe('MealsService', () => {
             fat: 15,
             carbohydrates: 60,
           },
-          foodPrice: 50,
         },
+        mealType: MealType.LUNCH,
       };
 
-      const meal = { id: 'meal123', userId };
-      mockDishesService.findOrCreateAndUpdate.mockResolvedValue({ id: 1, name: 'Test Food' });
-      mockPrismaService.meal.create.mockResolvedValue(meal);
+      const mockMeal = {
+        id: 'meal123',
+        userId,
+        imageUrl: dto.imageUrl,
+        thumbnailUrl: dto.thumbnailUrl,
+        foodName: 'Test Food',
+        cuisine: 'Chinese',
+        mealType: MealType.LUNCH,
+        calories: 500,
+        protein: 20,
+        fat: 15,
+        carbohydrates: 60,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        isSynced: false,
+        version: 1,
+      };
 
-      const existingUnlock = { id: 1, mealCount: 3 };
-      mockPrismaService.cuisine_unlocks.findUnique.mockResolvedValue(existingUnlock);
-      mockPrismaService.cuisine_unlocks.update.mockResolvedValue({});
-      mockPrismaService.daily_nutritions.findUnique.mockResolvedValue(null);
-      mockPrismaService.daily_nutritions.create.mockResolvedValue({});
+      const mockDish = {
+        id: 1,
+        name: 'Test Food',
+        cuisine: 'Chinese',
+      };
+
+      (prismaService.runTransaction as jest.Mock).mockImplementation(async (callback) => {
+        return callback(mockTx as any);
+      });
+
+      mockDishesService.findOrCreateAndUpdateInTx.mockResolvedValue(mockDish);
+      mockTx.meal.create.mockResolvedValue(mockMeal);
+      mockTx.cuisine_unlocks.findUnique.mockResolvedValue({ id: 1, mealCount: 5 });
+      mockTx.daily_nutritions.findUnique.mockResolvedValue(null);
+      mockTx.dish_unlocks.findUnique.mockResolvedValue(null);
 
       await service.create(userId, dto);
 
-      expect(mockPrismaService.cuisine_unlocks.update).toHaveBeenCalled();
+      expect(mockTx.cuisine_unlocks.update).toHaveBeenCalledWith({
+        where: { id: 1 },
+        data: { mealCount: { increment: 1 }, lastMealAt: expect.any(Date) },
+      });
     });
   });
 
-  describe('findAll', () => {
-    it('should return paginated meals', async () => {
+  describe('getToday', () => {
+    it('should return today\'s meals', async () => {
       const userId = 'userId123';
-      const query = {
-        page: 1,
-        limit: 20,
-      };
-
-      const meals = [
-        { id: 'meal1', userId },
-        { id: 'meal2', userId },
+      const mockMeals = [
+        {
+          id: 'meal1',
+          userId,
+          imageUrl: 'https://example.com/image1.jpg',
+          foodName: 'Food 1',
+          cuisine: 'Chinese',
+          mealType: MealType.BREAKFAST,
+          createdAt: new Date(),
+          analysis: {},
+        },
       ];
 
-      mockPrismaService.meal.findMany.mockResolvedValue(meals);
-      mockPrismaService.meal.count.mockResolvedValue(2);
+      mockPrismaService.meal.findMany.mockResolvedValue(mockMeals);
 
-      const result = await service.findAll(userId, query as any);
+      const result = await service.getToday(userId);
 
-      expect(result.data).toHaveLength(2);
-      expect(result.total).toBe(2);
-      expect(result.page).toBe(1);
-      expect(result.limit).toBe(20);
-    });
-
-    it('should filter by meal type', async () => {
-      const userId = 'userId123';
-      const query = {
-        page: 1,
-        limit: 20,
-        mealType: 'BREAKFAST' as const,
-      };
-
-      mockPrismaService.meal.findMany.mockResolvedValue([]);
-      mockPrismaService.meal.count.mockResolvedValue(0);
-
-      await service.findAll(userId, query as any);
-
-      expect(mockPrismaService.meal.findMany).toHaveBeenCalledWith(
-        expect.objectContaining({
-          where: expect.objectContaining({
-            mealType: 'BREAKFAST',
-          }),
-        })
-      );
-    });
-
-    it('should filter by date range', async () => {
-      const userId = 'userId123';
-      const query = {
-        page: 1,
-        limit: 20,
-        startDate: '2024-01-01T00:00:00Z',
-        endDate: '2024-01-31T23:59:59Z',
-      };
-
-      mockPrismaService.meal.findMany.mockResolvedValue([]);
-      mockPrismaService.meal.count.mockResolvedValue(0);
-
-      await service.findAll(userId, query as any);
-
-      expect(mockPrismaService.meal.findMany).toHaveBeenCalledWith(
-        expect.objectContaining({
-          where: expect.objectContaining({
-            createdAt: expect.objectContaining({
-              gte: expect.any(Date),
-              lte: expect.any(Date),
-            }),
-          }),
-        })
-      );
+      expect(prismaService.meal.findMany).toHaveBeenCalledWith({
+        where: {
+          userId,
+          createdAt: { gte: expect.any(Date), lt: expect.any(Date) },
+          deletedAt: null,
+        },
+        orderBy: { createdAt: 'desc' },
+      });
+      expect(result).toHaveLength(1);
     });
   });
 
   describe('findOne', () => {
-    it('should return a meal', async () => {
+    it('should return a single meal', async () => {
       const userId = 'userId123';
       const mealId = 'meal123';
+      const mockMeal = {
+        id: mealId,
+        userId,
+        imageUrl: 'https://example.com/image.jpg',
+        foodName: 'Test Food',
+        cuisine: 'Chinese',
+        createdAt: new Date(),
+        analysis: {},
+      };
 
-      const meal = { id: mealId, userId };
-      mockPrismaService.meal.findFirst.mockResolvedValue(meal);
+      mockPrismaService.meal.findFirst.mockResolvedValue(mockMeal);
 
       const result = await service.findOne(userId, mealId);
 
-      expect(result.id).toBe(mealId);
+      expect(prismaService.meal.findFirst).toHaveBeenCalledWith({
+        where: { id: mealId, userId, deletedAt: null },
+      });
+      expect(result).toHaveProperty('id', mealId);
     });
 
     it('should throw NotFoundException if meal not found', async () => {
-      const userId = 'userId123';
-      const mealId = 'nonexistent';
-
       mockPrismaService.meal.findFirst.mockResolvedValue(null);
 
-      await expect(service.findOne(userId, mealId)).rejects.toThrow(NotFoundException);
+      await expect(service.findOne('userId123', 'meal123'))
+        .rejects.toThrow('Meal not found');
     });
   });
 
@@ -275,28 +329,40 @@ describe('MealsService', () => {
       const userId = 'userId123';
       const mealId = 'meal123';
       const dto: UpdateMealDto = {
-        mealType: 'LUNCH',
+        notes: 'Updated notes',
       };
 
-      const meal = { id: mealId, userId, version: 1 };
-      const updatedMeal = { id: mealId, userId, version: 2, mealType: 'LUNCH' };
+      const existingMeal = {
+        id: mealId,
+        userId,
+        imageUrl: 'https://example.com/image.jpg',
+        foodName: 'Test Food',
+        cuisine: 'Chinese',
+        deletedAt: null,
+      };
 
-      mockPrismaService.meal.findFirst.mockResolvedValue(meal);
+      const updatedMeal = {
+        ...existingMeal,
+        notes: 'Updated notes',
+        version: 2,
+      };
+
+      mockPrismaService.meal.findFirst.mockResolvedValue(existingMeal);
       mockPrismaService.meal.update.mockResolvedValue(updatedMeal);
 
       const result = await service.update(userId, mealId, dto);
 
-      expect(result.version).toBe(2);
+      expect(prismaService.meal.update).toHaveBeenCalledWith({
+        where: { id: mealId },
+        data: { notes: 'Updated notes', version: { increment: 1 } },
+      });
     });
 
-    it('should throw NotFoundException if meal not found', async () => {
-      const userId = 'userId123';
-      const mealId = 'nonexistent';
-      const dto: UpdateMealDto = {};
-
+    it('should throw NotFoundException if meal to update not found', async () => {
       mockPrismaService.meal.findFirst.mockResolvedValue(null);
 
-      await expect(service.update(userId, mealId, dto)).rejects.toThrow(NotFoundException);
+      await expect(service.update('userId123', 'meal123', { notes: 'test' }))
+        .rejects.toThrow('Meal not found');
     });
   });
 
@@ -305,70 +371,103 @@ describe('MealsService', () => {
       const userId = 'userId123';
       const mealId = 'meal123';
 
-      const meal = { id: mealId, userId };
-      mockPrismaService.meal.findFirst.mockResolvedValue(meal);
-      mockPrismaService.meal.update.mockResolvedValue({});
+      const existingMeal = {
+        id: mealId,
+        userId,
+        imageUrl: 'https://example.com/image.jpg',
+        foodName: 'Test Food',
+        cuisine: 'Chinese',
+        deletedAt: null,
+      };
+
+      mockPrismaService.meal.findFirst.mockResolvedValue(existingMeal);
+      mockPrismaService.meal.update.mockResolvedValue({ ...existingMeal, deletedAt: expect.any(Date) });
 
       await service.remove(userId, mealId);
 
-      expect(mockPrismaService.meal.update).toHaveBeenCalledWith({
+      expect(prismaService.meal.update).toHaveBeenCalledWith({
         where: { id: mealId },
         data: { deletedAt: expect.any(Date) },
       });
     });
 
-    it('should throw NotFoundException if meal not found', async () => {
-      const userId = 'userId123';
-      const mealId = 'nonexistent';
-
+    it('should throw NotFoundException if meal to delete not found', async () => {
       mockPrismaService.meal.findFirst.mockResolvedValue(null);
 
-      await expect(service.remove(userId, mealId)).rejects.toThrow(NotFoundException);
-    });
-  });
-
-  describe('getToday', () => {
-    it('should return today\'s meals', async () => {
-      const userId = 'userId123';
-
-      const today = new Date();
-      today.setHours(0, 0, 0, 0);
-
-      const meals = [
-        { id: 'meal1', userId, createdAt: new Date() },
-        { id: 'meal2', userId, createdAt: new Date() },
-      ];
-
-      mockPrismaService.meal.findMany.mockResolvedValue(meals);
-
-      const result = await service.getToday(userId);
-
-      expect(result).toHaveLength(2);
-      expect(mockPrismaService.meal.findMany).toHaveBeenCalledWith(
-        expect.objectContaining({
-          where: expect.objectContaining({
-            createdAt: expect.objectContaining({
-              gte: expect.any(Date),
-              lt: expect.any(Date),
-            }),
-          }),
-        })
-      );
+      await expect(service.remove('userId123', 'meal123'))
+        .rejects.toThrow('Meal not found');
     });
   });
 
   describe('getByDate', () => {
     it('should return meals for a specific date', async () => {
       const userId = 'userId123';
-      const date = new Date('2024-01-15');
+      const date = new Date('2024-01-15T10:00:00Z');
+      const mockMeals = [
+        {
+          id: 'meal1',
+          userId,
+          imageUrl: 'https://example.com/image.jpg',
+          foodName: 'Food 1',
+          cuisine: 'Chinese',
+          createdAt: date,
+          analysis: {},
+        },
+      ];
 
-      const meals = [{ id: 'meal1', userId }];
-
-      mockPrismaService.meal.findMany.mockResolvedValue(meals);
+      mockPrismaService.meal.findMany.mockResolvedValue(mockMeals);
 
       const result = await service.getByDate(userId, date);
 
+      expect(prismaService.meal.findMany).toHaveBeenCalledWith({
+        where: {
+          userId,
+          createdAt: { gte: expect.any(Date), lt: expect.any(Date) },
+          deletedAt: null,
+        },
+        orderBy: { createdAt: 'desc' },
+      });
       expect(result).toHaveLength(1);
+    });
+  });
+
+  describe('getByDishName', () => {
+    it('should return meals and dish info for a specific dish', async () => {
+      const userId = 'userId123';
+      const foodName = 'Kung Pao Chicken';
+      const mockMeals = [
+        {
+          id: 'meal1',
+          userId,
+          imageUrl: 'https://example.com/image.jpg',
+          foodName,
+          cuisine: 'Chinese',
+          createdAt: new Date(),
+          analysis: {},
+        },
+      ];
+
+      const mockDish = {
+        name: foodName,
+        cuisine: 'Chinese',
+        appearanceCount: 10,
+        averageCalories: 450,
+        averageProtein: 25,
+        averageFat: 18,
+        averageCarbs: 35,
+        description: 'A classic Chinese dish',
+        historicalOrigins: 'Sichuan cuisine',
+      };
+
+      mockPrismaService.meal.findMany.mockResolvedValue(mockMeals);
+      mockPrismaService.dish.findUnique.mockResolvedValue(mockDish);
+
+      const result = await service.getByDishName(userId, foodName);
+
+      expect(result).toHaveProperty('meals');
+      expect(result).toHaveProperty('dish');
+      expect(result.meals).toHaveLength(1);
+      expect(result.dish?.name).toBe(foodName);
     });
   });
 });

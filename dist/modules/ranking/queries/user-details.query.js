@@ -18,40 +18,36 @@ let UserDetailsQuery = class UserDetailsQuery {
     constructor(prisma) {
         this.prisma = prisma;
     }
-    async getCuisineExpertDetail(userId, cuisineName, period) {
-        const { startDate } = this.getDateRange(period);
-        const user = await this.prisma.user.findUnique({
-            where: { id: userId },
-            select: {
-                id: true,
-                username: true,
-                avatarUrl: true,
-            },
-        });
-        if (!user) {
-            throw new common_1.NotFoundException('User not found');
-        }
-        const where = {
-            userId,
-            cuisine: cuisineName,
-            deletedAt: null,
-        };
-        if (startDate) {
-            where.createdAt = { gte: startDate };
-        }
-        const meals = await this.prisma.meal.findMany({
-            where,
-            select: {
-                foodName: true,
-                cuisine: true,
-                createdAt: true,
-                imageUrl: true,
-                calories: true,
-                notes: true,
-            },
-            orderBy: { createdAt: 'desc' },
-        });
-        if (meals.length === 0) {
+    async getCuisineExpertDetail(userId, cuisineName, period, limit = 50, offset = 0) {
+        const { startDate, startDateCondition } = this.getDateRangeSql(period);
+        const result = await this.prisma.$queryRaw `
+      SELECT
+        u.id as "userId",
+        u.username,
+        u."avatarUrl",
+        m."foodName",
+        m.cuisine,
+        m."createdAt",
+        m."imageUrl",
+        m.calories,
+        m.notes
+      FROM users u
+      INNER JOIN meals m ON m."userId" = u.id
+        AND m.cuisine = ${cuisineName}
+        AND m."deletedAt" IS NULL
+        ${startDateCondition}
+      WHERE u.id = ${userId}
+        AND u."deletedAt" IS NULL
+      ORDER BY m."createdAt" DESC
+    `;
+        if (result.length === 0) {
+            const user = await this.prisma.user.findUnique({
+                where: { id: userId },
+                select: { id: true, username: true, avatarUrl: true },
+            });
+            if (!user) {
+                throw new common_1.NotFoundException('User not found');
+            }
             return {
                 userId: user.id,
                 username: user.username,
@@ -61,196 +57,168 @@ let UserDetailsQuery = class UserDetailsQuery {
                 totalDishes: 0,
                 totalMeals: 0,
                 dishes: [],
+                offset,
+                limit,
+                hasMore: false,
             };
         }
+        const firstRow = result[0];
         const dishStats = new Map();
-        for (const meal of meals) {
-            const existing = dishStats.get(meal.foodName);
+        for (const row of result) {
+            const existing = dishStats.get(row.foodName);
             if (!existing) {
-                dishStats.set(meal.foodName, {
-                    dishName: meal.foodName,
-                    cuisine: meal.cuisine,
+                dishStats.set(row.foodName, {
+                    dishName: row.foodName,
+                    cuisine: row.cuisine,
                     mealCount: 1,
-                    firstMealAt: new Date(meal.createdAt).toISOString(),
-                    lastMealAt: new Date(meal.createdAt).toISOString(),
-                    imageUrl: meal.imageUrl,
-                    calories: meal.calories || undefined,
-                    notes: meal.notes || undefined,
+                    firstMealAt: new Date(row.createdAt).toISOString(),
+                    lastMealAt: new Date(row.createdAt).toISOString(),
+                    imageUrl: row.imageUrl || undefined,
+                    calories: row.calories || undefined,
+                    notes: row.notes || undefined,
                 });
             }
             else {
                 existing.mealCount++;
-                existing.lastMealAt = new Date(meal.createdAt).toISOString();
+                existing.lastMealAt = new Date(row.createdAt).toISOString();
             }
         }
-        const dishes = Array.from(dishStats.values()).sort((a, b) => b.mealCount - a.mealCount);
+        const allDishes = Array.from(dishStats.values()).sort((a, b) => b.mealCount - a.mealCount);
+        const paginatedDishes = allDishes.slice(offset, offset + limit);
         return {
-            userId: user.id,
-            username: user.username,
-            avatarUrl: user.avatarUrl,
+            userId: firstRow.userId,
+            username: firstRow.username,
+            avatarUrl: firstRow.avatarUrl,
             cuisineName,
             period,
-            totalDishes: dishes.length,
-            totalMeals: meals.length,
-            dishes,
+            totalDishes: allDishes.length,
+            totalMeals: result.length,
+            dishes: paginatedDishes,
+            offset,
+            limit,
+            hasMore: offset + limit < allDishes.length,
         };
     }
     async getAllUsersDishes(period) {
-        const { startDate } = this.getDateRange(period);
-        const allUsers = await this.prisma.user.findMany({
-            where: {
-                deletedAt: null,
-                OR: [
-                    { user_settings: { is: null } },
-                    { user_settings: { hideRanking: false } },
-                ],
-            },
-            select: {
-                id: true,
-                username: true,
-                avatarUrl: true,
-            },
-        });
-        const userIds = allUsers.map(u => u.id);
-        const userMap = new Map(allUsers.map(u => [u.id, u]));
-        const where = {
-            userId: { in: userIds },
-            deletedAt: null,
-        };
-        if (startDate) {
-            where.createdAt = { gte: startDate };
-        }
-        const meals = await this.prisma.meal.findMany({
-            where,
-            select: {
-                userId: true,
-                foodName: true,
-                cuisine: true,
-                createdAt: true,
-            },
-            orderBy: { createdAt: 'desc' },
-        });
-        const userCuisineStats = new Map();
-        for (const meal of meals) {
-            const key = `${meal.userId}|${meal.cuisine}`;
-            let entry = userCuisineStats.get(key);
-            if (!entry) {
-                const user = userMap.get(meal.userId);
-                if (!user)
-                    continue;
-                entry = {
-                    userId: meal.userId,
-                    username: user.username,
-                    avatarUrl: user.avatarUrl,
-                    cuisineName: meal.cuisine,
-                    dishSet: new Set(),
-                    mealCount: 0,
-                    firstMealAt: new Date(meal.createdAt),
-                };
-                userCuisineStats.set(key, entry);
-            }
-            entry.dishSet.add(meal.foodName);
-            entry.mealCount++;
-        }
-        const entries = [];
-        for (const stats of userCuisineStats.values()) {
-            entries.push({
-                rank: 0,
-                userId: stats.userId,
-                username: stats.username,
-                avatarUrl: stats.avatarUrl,
-                cuisineName: stats.cuisineName,
-                dishCount: stats.dishSet.size,
-                mealCount: stats.mealCount,
-                firstMealAt: stats.firstMealAt.toISOString(),
-            });
-        }
-        entries.sort((a, b) => {
-            if (b.dishCount !== a.dishCount) {
-                return b.dishCount - a.dishCount;
-            }
-            return new Date(a.firstMealAt).getTime() - new Date(b.firstMealAt).getTime();
-        });
-        entries.forEach((e, index) => { e.rank = index + 1; });
-        const uniqueUsers = new Set(entries.map(e => e.userId));
-        const uniqueCuisines = new Set(entries.map(e => e.cuisineName));
+        const { startDate, startDateCondition } = this.getDateRangeSql(period);
+        const entries = await this.prisma.$queryRaw `
+      SELECT
+        u.id as "userId",
+        u.username,
+        u."avatarUrl",
+        m.cuisine as "cuisineName",
+        COUNT(DISTINCT m."foodName") as "dishCount",
+        COUNT(m.id) as "mealCount",
+        MIN(m."createdAt") as "firstMealAt"
+      FROM users u
+      INNER JOIN meals m ON m."userId" = u.id
+        AND m."deletedAt" IS NULL
+        ${startDateCondition}
+      LEFT JOIN user_settings us ON us."userId" = u.id
+      WHERE u."deletedAt" IS NULL
+        AND (us.id IS NULL OR us."hideRanking" = false)
+      GROUP BY u.id, u.username, u."avatarUrl", m.cuisine
+      HAVING COUNT(DISTINCT m."foodName") > 0
+      ORDER BY "dishCount" DESC, "firstMealAt" ASC
+    `;
+        const rankedEntries = entries.map((e, index) => ({
+            rank: index + 1,
+            userId: e.userId,
+            username: e.username,
+            avatarUrl: e.avatarUrl,
+            cuisineName: e.cuisineName,
+            dishCount: Number(e.dishCount),
+            mealCount: Number(e.mealCount),
+            firstMealAt: e.firstMealAt.toISOString(),
+        }));
+        const uniqueUsers = new Set(rankedEntries.map(e => e.userId));
+        const uniqueCuisines = new Set(rankedEntries.map(e => e.cuisineName));
         return {
             period,
-            totalEntries: entries.length,
+            totalEntries: rankedEntries.length,
             totalUsers: uniqueUsers.size,
             totalCuisines: uniqueCuisines.size,
-            entries,
+            entries: rankedEntries,
         };
     }
-    async getUserUnlockedDishes(userId) {
-        const user = await this.prisma.user.findUnique({
-            where: { id: userId },
-            select: {
-                id: true,
-                username: true,
-                avatarUrl: true,
-            },
-        });
-        if (!user) {
-            throw new common_1.NotFoundException('User not found');
-        }
-        const unlocks = await this.prisma.dish_unlocks.findMany({
-            where: { userId },
-            select: {
-                dishName: true,
-                mealCount: true,
-                firstMealAt: true,
-                lastMealAt: true,
-            },
-            orderBy: { lastMealAt: 'desc' },
-        });
-        const dishNames = unlocks.map(u => u.dishName);
-        const mealsInfo = await this.prisma.meal.findMany({
-            where: {
-                foodName: { in: dishNames },
-                userId,
-                deletedAt: null,
-            },
-            select: {
-                foodName: true,
-                cuisine: true,
-                imageUrl: true,
-                calories: true,
-            },
-            distinct: ['foodName'],
-        });
-        const dishInfoMap = new Map();
-        for (const meal of mealsInfo) {
-            dishInfoMap.set(meal.foodName, {
-                cuisine: meal.cuisine,
-                imageUrl: meal.imageUrl || undefined,
-                calories: meal.calories || undefined,
+    async getUserUnlockedDishes(userId, limit = 50, offset = 0) {
+        const countResult = await this.prisma.$queryRaw `
+      SELECT COUNT(*) as count
+      FROM dish_unlocks
+      WHERE "userId" = ${userId}
+    `;
+        const totalDishes = Number(countResult[0]?.count || 0);
+        const result = await this.prisma.$queryRaw `
+      SELECT
+        u.id as "userId",
+        u.username,
+        u."avatarUrl",
+        du."dishName",
+        du."mealCount",
+        du."firstMealAt",
+        du."lastMealAt",
+        COALESCE(m.cuisine, '未知') as cuisine,
+        m."imageUrl",
+        m.calories
+      FROM users u
+      INNER JOIN dish_unlocks du ON du."userId" = u.id
+      LEFT JOIN LATERAL (
+        SELECT cuisine, "imageUrl", calories
+        FROM meals
+        WHERE "userId" = ${userId}
+          AND "foodName" = du."dishName"
+          AND "deletedAt" IS NULL
+        LIMIT 1
+      ) m ON true
+      WHERE u.id = ${userId}
+        AND u."deletedAt" IS NULL
+      ORDER BY du."mealCount" DESC
+      LIMIT ${limit} OFFSET ${offset}
+    `;
+        if (result.length === 0) {
+            const user = await this.prisma.user.findUnique({
+                where: { id: userId },
+                select: { id: true, username: true, avatarUrl: true },
             });
-        }
-        const dishes = unlocks.map(unlock => {
-            const info = dishInfoMap.get(unlock.dishName);
+            if (!user) {
+                throw new common_1.NotFoundException('User not found');
+            }
             return {
-                dishName: unlock.dishName,
-                cuisine: info?.cuisine || '未知',
-                mealCount: unlock.mealCount,
-                firstMealAt: unlock.firstMealAt.toISOString(),
-                lastMealAt: unlock.lastMealAt?.toISOString() || unlock.firstMealAt.toISOString(),
-                imageUrl: info?.imageUrl,
-                calories: info?.calories,
+                userId: user.id,
+                username: user.username,
+                avatarUrl: user.avatarUrl,
+                totalDishes: 0,
+                totalMeals: 0,
+                dishes: [],
+                offset,
+                limit,
+                hasMore: false,
             };
-        });
-        dishes.sort((a, b) => b.mealCount - a.mealCount);
+        }
+        const firstRow = result[0];
+        const dishes = result.map(row => ({
+            dishName: row.dishName,
+            cuisine: row.cuisine,
+            mealCount: Number(row.mealCount),
+            firstMealAt: row.firstMealAt.toISOString(),
+            lastMealAt: row.lastMealAt?.toISOString() || row.firstMealAt.toISOString(),
+            imageUrl: row.imageUrl || undefined,
+            calories: row.calories || undefined,
+        }));
         const totalMeals = dishes.reduce((sum, d) => sum + d.mealCount, 0);
         return {
-            userId: user.id,
-            username: user.username,
-            avatarUrl: user.avatarUrl,
-            totalDishes: dishes.length,
+            userId: firstRow.userId,
+            username: firstRow.username,
+            avatarUrl: firstRow.avatarUrl,
+            totalDishes,
             totalMeals,
             dishes,
+            offset,
+            limit,
+            hasMore: offset + limit < totalDishes,
         };
     }
-    getDateRange(period) {
+    getDateRangeSql(period) {
         const now = new Date();
         let startDate;
         switch (period) {
@@ -271,7 +239,10 @@ let UserDetailsQuery = class UserDetailsQuery {
                 startDate = undefined;
                 break;
         }
-        return { startDate };
+        const startDateCondition = startDate
+            ? client_1.Prisma.sql `AND m."createdAt" >= ${startDate}`
+            : client_1.Prisma.empty;
+        return { startDate, startDateCondition };
     }
 };
 exports.UserDetailsQuery = UserDetailsQuery;

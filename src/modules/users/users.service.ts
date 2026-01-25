@@ -1,15 +1,24 @@
 /**
- * [INPUT]: 依赖 PrismaService 的数据库访问能力
+ * [INPUT]: 依赖 PrismaService 的数据库访问能力、CacheService 的缓存服务
  * [OUTPUT]: 对外提供用户资料、设置、统计、配额管理
  * [POS]: users 模块的核心服务层，被 users.controller、storage.controller 消费
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ *
+ * [PERFORMANCE NOTES]
+ * - 用户统计数据使用缓存减少数据库查询
+ * - Streak 计算使用日期聚合查询优化
+ * - 用户资料和设置使用 @Cacheable 装饰器自动管理缓存
  */
 import { Injectable, NotFoundException, BadRequestException, Logger } from '@nestjs/common';
 import { PrismaService } from '../../database/prisma.service';
-import { User } from '@prisma/client';
+import { User, user_profiles, user_settings } from '@prisma/client';
 import { UpdateProfileDto } from './dto/update-profile.dto';
 import { UpdateSettingsDto } from './dto/update-settings.dto';
 import { ProfileResponseDto, SettingsResponseDto, UserStatsDto } from './dto/user-response.dto';
+import { CacheService } from '../cache/cache.service';
+import { CacheStatsService } from '../cache/cache-stats.service';
+import { Cacheable, CacheInvalidate } from '../cache/cache.decorator';
+import { CachePrefix, CacheTTL } from '../cache/cache.constants';
 
 /**
  * 用户 upsert 创建数据（用于 updateProfile）
@@ -48,11 +57,23 @@ interface UserSettingsUpsertCreate {
   };
 }
 
+/**
+ * 用户实体（包含关联数据）
+ */
+interface UserWithRelations extends User {
+  user_profiles?: user_profiles | null;
+  user_settings?: user_settings | null;
+}
+
 @Injectable()
 export class UsersService {
   private readonly logger = new Logger(UsersService.name);
 
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    public cacheService: CacheService,
+    public cacheStatsService: CacheStatsService,
+  ) {}
 
   // ============================================================
   // Public Methods
@@ -122,8 +143,9 @@ export class UsersService {
   }
 
   /**
-   * 获取用户资料
+   * 获取用户资料（带缓存）
    */
+  @Cacheable(CachePrefix.USER_PROFILE, ['userId'], CacheTTL.LONG)
   async getProfile(userId: string): Promise<ProfileResponseDto> {
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
@@ -138,8 +160,9 @@ export class UsersService {
   }
 
   /**
-   * 更新用户资料
+   * 更新用户资料（带缓存失效）
    */
+  @CacheInvalidate(CachePrefix.USER_PROFILE, ['userId'], `${CachePrefix.USER_PROFILE}:*`)
   async updateProfile(userId: string, dto: UpdateProfileDto): Promise<ProfileResponseDto> {
     const user = await this.prisma.user.upsert({
       where: { id: userId },
@@ -163,8 +186,9 @@ export class UsersService {
   }
 
   /**
-   * 获取用户设置
+   * 获取用户设置（带缓存）
    */
+  @Cacheable(CachePrefix.USER_SETTINGS, ['userId'], CacheTTL.LONG)
   async getSettings(userId: string): Promise<SettingsResponseDto> {
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
@@ -179,8 +203,9 @@ export class UsersService {
   }
 
   /**
-   * 更新用户设置
+   * 更新用户设置（带缓存失效）
    */
+  @CacheInvalidate(CachePrefix.USER_SETTINGS, ['userId'], `${CachePrefix.USER_SETTINGS}:*`)
   async updateSettings(userId: string, dto: UpdateSettingsDto): Promise<SettingsResponseDto> {
     const createData: UserSettingsUpsertCreate = {
       id: userId,
@@ -215,6 +240,11 @@ export class UsersService {
    * 获取用户统计数据
    */
   async getStats(userId: string): Promise<UserStatsDto> {
+    // 使用缓存 - 用户统计数据变化频率较低
+    const cacheKey = `${CachePrefix.USER}:${userId}:stats`;
+    const cached = await this.cacheService.get<UserStatsDto>(cacheKey);
+    if (cached) return cached;
+
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
     });
@@ -223,7 +253,8 @@ export class UsersService {
       throw new NotFoundException('User not found');
     }
 
-    const [totalMeals, totalCuisines, mealsByCuisine] = await Promise.all([
+    // 使用单个聚合查询获取多个统计数据
+    const [totalMeals, totalCuisines, mealsByCuisine, periodCounts] = await Promise.all([
       this.prisma.meal.count({ where: { userId, deletedAt: null } }),
       this.prisma.cuisine_unlocks.count({ where: { userId } }),
       this.prisma.cuisine_unlocks.findMany({
@@ -231,49 +262,42 @@ export class UsersService {
         orderBy: { mealCount: 'desc' },
         take: 5,
       }),
-    ]);
-
-    const today = this.getStartOfDay();
-    const weekAgo = new Date(today);
-    weekAgo.setDate(weekAgo.getDate() - 7);
-
-    const monthAgo = new Date(today);
-    monthAgo.setDate(monthAgo.getDate() - 30);
-
-    const [thisWeekMeals, thisMonthMeals] = await Promise.all([
-      this.prisma.meal.count({
-        where: {
-          userId,
-          createdAt: { gte: weekAgo },
-          deletedAt: null,
-        },
-      }),
-      this.prisma.meal.count({
-        where: {
-          userId,
-          createdAt: { gte: monthAgo },
-          deletedAt: null,
-        },
-      }),
+      // 使用单个查询获取周/月统计
+      this.prisma.$queryRaw<Array<{
+        week_count: bigint;
+        month_count: bigint;
+      }>>`
+        SELECT
+          COUNT(*) FILTER (WHERE "createdAt" >= NOW() - INTERVAL '7 days') as week_count,
+          COUNT(*) FILTER (WHERE "createdAt" >= NOW() - INTERVAL '30 days') as month_count
+        FROM meals
+        WHERE "userId" = ${userId}
+          AND "deletedAt" IS NULL
+      `,
     ]);
 
     const [currentStreak, longestStreak] = await Promise.all([
-      this.calculateStreak(userId),
-      this.calculateLongestStreak(userId),
+      this.calculateStreakOptimized(userId),
+      this.calculateLongestStreakOptimized(userId),
     ]);
 
-    return {
+    const result: UserStatsDto = {
       totalMeals,
       totalCuisines,
       currentStreak,
       longestStreak,
-      thisWeekMeals,
-      thisMonthMeals,
+      thisWeekMeals: Number(periodCounts[0]?.week_count || 0),
+      thisMonthMeals: Number(periodCounts[0]?.month_count || 0),
       favoriteCuisines: mealsByCuisine.map(c => ({
         name: c.cuisineName,
         count: c.mealCount,
       })),
     };
+
+    // 缓存结果（较长的 TTL，因为统计数据变化慢）
+    await this.cacheService.set(cacheKey, result, CacheTTL.LONG);
+
+    return result;
   }
 
   /**
@@ -333,7 +357,63 @@ export class UsersService {
   // ============================================================
 
   /**
-   * 计算当前连续打卡天数
+   * 计算当前连续打卡天数（优化版 - 使用数据库聚合）
+   */
+  private async calculateStreakOptimized(userId: string): Promise<number> {
+    // 使用 SQL 聚合查询直接计算连续天数
+    const result = await this.prisma.$queryRaw<Array<{ streak: bigint }>>`
+      WITH date_series AS (
+        SELECT DISTINCT DATE("createdAt") as date
+        FROM meals
+        WHERE "userId" = ${userId}
+          AND "deletedAt" IS NULL
+          AND "createdAt" >= NOW() - INTERVAL '365 days'
+        ORDER BY date DESC
+        LIMIT 365
+      ),
+      streak_groups AS (
+        SELECT date,
+          date - (ROW_NUMBER() OVER (ORDER BY date DESC) || INTERVAL '1 day') as grp
+        FROM date_series
+      )
+      SELECT COUNT(*) as streak
+      FROM streak_groups
+      WHERE grp = (SELECT grp FROM streak_groups ORDER BY date DESC LIMIT 1)
+    `;
+
+    return result[0] ? Number(result[0].streak) : 0;
+  }
+
+  /**
+   * 计算最长连续打卡天数（优化版 - 使用数据库聚合）
+   */
+  private async calculateLongestStreakOptimized(userId: string): Promise<number> {
+    // 使用 SQL 聚合查询直接计算最长连续天数
+    const result = await this.prisma.$queryRaw<Array<{ longest_streak: bigint }>>`
+      WITH date_series AS (
+        SELECT DISTINCT DATE("createdAt") as date
+        FROM meals
+        WHERE "userId" = ${userId}
+          AND "deletedAt" IS NULL
+        ORDER BY date ASC
+      ),
+      streak_groups AS (
+        SELECT date,
+          date - (ROW_NUMBER() OVER (ORDER BY date ASC) || INTERVAL '1 day') as grp
+        FROM date_series
+      )
+      SELECT MAX(COUNT(*)) as longest_streak
+      FROM streak_groups
+      GROUP BY grp
+      ORDER BY longest_streak DESC
+      LIMIT 1
+    `;
+
+    return result[0] ? Number(result[0].longest_streak) : 0;
+  }
+
+  /**
+   * 计算当前连续打卡天数（旧方法 - 作为备用）
    */
   private async calculateStreak(userId: string): Promise<number> {
     const meals = await this.prisma.meal.findMany({
@@ -367,7 +447,7 @@ export class UsersService {
   }
 
   /**
-   * 计算最长连续打卡天数
+   * 计算最长连续打卡天数（旧方法 - 作为备用）
    */
   private async calculateLongestStreak(userId: string): Promise<number> {
     const meals = await this.prisma.meal.findMany({
@@ -408,13 +488,13 @@ export class UsersService {
   /**
    * 映射用户实体到资料响应
    */
-  private mapToProfileResponse(user: any): ProfileResponseDto {
+  private mapToProfileResponse(user: UserWithRelations): ProfileResponseDto {
     return {
       id: user.id,
       username: user.username,
-      displayName: user.user_profiles?.displayName || user.displayName || null,
-      bio: user.user_profiles?.bio || null,
-      avatarUrl: user.user_profiles?.avatarUrl || user.avatarUrl || null,
+      displayName: user.user_profiles?.displayName ?? undefined,
+      bio: user.user_profiles?.bio ?? undefined,
+      avatarUrl: user.user_profiles?.avatarUrl ?? undefined,
       createdAt: user.createdAt,
     };
   }
@@ -422,16 +502,16 @@ export class UsersService {
   /**
    * 映射用户实体到设置响应
    */
-  private mapToSettingsResponse(user: any): SettingsResponseDto {
-    const settings = user.user_settings || {};
+  private mapToSettingsResponse(user: UserWithRelations): SettingsResponseDto {
+    const settings = user.user_settings;
     return {
-      language: settings.language || 'ZH',
-      theme: settings.theme || 'AUTO',
-      notificationsEnabled: settings.notificationsEnabled ?? true,
-      breakfastReminderTime: settings.breakfastReminderTime || null,
-      lunchReminderTime: settings.lunchReminderTime || null,
-      dinnerReminderTime: settings.dinnerReminderTime || null,
-      hideRanking: settings.hideRanking || false,
+      language: settings?.language as 'ZH' | 'EN' ?? 'ZH',
+      theme: settings?.theme as 'LIGHT' | 'DARK' | 'AUTO' ?? 'AUTO',
+      notificationsEnabled: settings?.notificationsEnabled ?? true,
+      breakfastReminderTime: settings?.breakfastReminderTime ?? undefined,
+      lunchReminderTime: settings?.lunchReminderTime ?? undefined,
+      dinnerReminderTime: settings?.dinnerReminderTime ?? undefined,
+      hideRanking: settings?.hideRanking ?? false,
     };
   }
 }

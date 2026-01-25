@@ -3,6 +3,13 @@
  * [OUTPUT]: 对外提供综合排行榜查询逻辑
  * [POS]: ranking 模块的综合排行榜查询服务
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ *
+ * [OPTIMIZATION NOTES]
+ * 优化前：多次独立查询 + 应用层 Join
+ * 优化后：单次 SQL 查询，数据库层完成所有聚合和 Join
+ * - 消除 N+1 问题
+ * - 减少数据库往返从 3 次到 1 次
+ * - 利用数据库索引加速
  */
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../../../database/prisma.service';
@@ -14,125 +21,73 @@ export class LeaderboardQuery {
   constructor(private prisma: PrismaService) {}
 
   /**
-   * 获取综合排行榜
-   * 使用 groupBy 和原始 SQL 进行数据库级聚合
+   * 获取综合排行榜（优化版 - 单次 SQL 查询）
+   *
+   * 使用原始 SQL 在数据库层完成：
+   * 1. 统计每个用户的餐食数
+   * 2. 统计每个用户的去重菜系数
+   * 3. 计算得分
+   * 4. Join 用户信息
+   * 5. 排序并限制返回数量
    */
   async execute(
     period: RankingPeriod,
     tier: string | undefined,
   ): Promise<LeaderboardDto> {
-    const { startDate } = this.getDateRange(period);
+    const { startDate, startDateCondition } = this.getDateRangeSql(period);
 
-    // 获取用户餐食计数
-    const mealCounts = await this.prisma.meal.groupBy({
-      by: ['userId'],
-      where: this.buildMealWhere(startDate),
-      _count: { id: true },
-      _sum: { calories: true },
-    });
-
-    // 使用原始 SQL 获取去重菜系数
-    const uniqueCuisineCounts = await this.prisma.$queryRaw<Array<{ userId: string; count: bigint }>>`
-      SELECT "userId", COUNT(DISTINCT "cuisine") as count
-      FROM "meals"
-      WHERE "deletedAt" IS NULL
-        ${startDate ? Prisma.sql`AND "createdAt" >= ${startDate}` : Prisma.empty}
-      GROUP BY "userId"
+    // 单次 SQL 查询完成所有操作
+    const rankings = await this.prisma.$queryRaw<Array<{
+      userId: string;
+      username: string;
+      avatarUrl: string | null;
+      mealCount: bigint;
+      cuisineCount: bigint;
+      score: bigint;
+    }>>`
+      SELECT
+        u.id as "userId",
+        u.username,
+        u."avatarUrl",
+        COUNT(m.id) as "mealCount",
+        COUNT(DISTINCT m.cuisine) as "cuisineCount",
+        (COUNT(m.id) * 10 + COUNT(DISTINCT m.cuisine) * 50) as "score"
+      FROM users u
+      LEFT JOIN meals m ON m."userId" = u.id
+        AND m."deletedAt" IS NULL
+        ${startDateCondition}
+      LEFT JOIN user_settings us ON us."userId" = u.id
+      WHERE u."deletedAt" IS NULL
+        AND (us.id IS NULL OR us."hideRanking" = false)
+        ${tier ? Prisma.sql`AND u."subscriptionTier" = ${tier}` : Prisma.empty}
+      GROUP BY u.id, u.username, u."avatarUrl"
+      HAVING COUNT(m.id) > 0
+      ORDER BY "score" DESC, "mealCount" DESC
+      LIMIT 100
     `;
-
-    const userMap = await this.getUserMap(tier);
-
-    // 构建统计数据映射
-    const mealCountMap = new Map(mealCounts.map(m => [m.userId, m._count.id]));
-    const cuisineCountMap = new Map(uniqueCuisineCounts.map(m => [m.userId, Number(m.count)]));
-
-    // 构建排行榜数据
-    const rankings: LeaderboardEntry[] = [];
-
-    for (const [userId, mealCount] of mealCountMap) {
-      const user = userMap.get(userId);
-      if (!user) continue;
-
-      const cuisineCount = cuisineCountMap.get(userId) || 0;
-      const score = mealCount * 10 + cuisineCount * 50;
-
-      rankings.push({
-        rank: 0,
-        userId,
-        username: user.username,
-        avatarUrl: user.avatarUrl,
-        score,
-        mealCount,
-        cuisineCount,
-      });
-    }
-
-    // 按 score 降序排序
-    rankings.sort((a, b) => b.score - a.score);
-
-    // 更新排名
-    rankings.forEach((r, index) => { r.rank = index + 1; });
 
     return {
       period,
       tier,
-      leaderboard: rankings.slice(0, 100),
+      leaderboard: rankings.map((r, index) => ({
+        rank: index + 1,
+        userId: r.userId,
+        username: r.username,
+        avatarUrl: r.avatarUrl,
+        score: Number(r.score),
+        mealCount: Number(r.mealCount),
+        cuisineCount: Number(r.cuisineCount),
+      })),
     };
   }
 
   /**
-   * 构建查询条件
+   * 根据时段获取开始日期和 SQL 条件
    */
-  private buildMealWhere(startDate: Date | undefined) {
-    const where: any = {
-      deletedAt: null,
-      users: {
-        OR: [
-          { user_settings: { is: null } },
-          { user_settings: { hideRanking: false } },
-        ],
-      },
-    };
-
-    if (startDate) {
-      where.createdAt = { gte: startDate };
-    }
-
-    return where;
-  }
-
-  /**
-   * 获取用户映射
-   */
-  private async getUserMap(tier: string | undefined): Promise<Map<string, { username: string; avatarUrl: string | null }>> {
-    const where: any = {
-      deletedAt: null,
-      OR: [
-        { user_settings: { is: null } },
-        { user_settings: { hideRanking: false } },
-      ],
-    };
-
-    if (tier) {
-      where.subscriptionTier = tier;
-    }
-
-    const users = await this.prisma.user.findMany({
-      where,
-      select: {
-        id: true,
-        username: true,
-        avatarUrl: true,
-      },
-    });
-
-    return new Map(users.map(u => [u.id, { username: u.username, avatarUrl: u.avatarUrl }]));
-  }
-
-  /**
-   * 根据时段获取开始日期
-   */
-  private getDateRange(period: RankingPeriod): { startDate?: Date } {
+  private getDateRangeSql(period: RankingPeriod): {
+    startDate?: Date;
+    startDateCondition: Prisma.Sql;
+  } {
     const now = new Date();
     let startDate: Date | undefined;
 
@@ -155,6 +110,10 @@ export class LeaderboardQuery {
         break;
     }
 
-    return { startDate };
+    const startDateCondition = startDate
+      ? Prisma.sql`AND m."createdAt" >= ${startDate}`
+      : Prisma.empty;
+
+    return { startDate, startDateCondition };
   }
 }

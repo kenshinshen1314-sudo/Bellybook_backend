@@ -12,12 +12,13 @@ const nutrition_controller_1 = require("./nutrition.controller");
 const nutrition_service_1 = require("./nutrition.service");
 const database_module_1 = require("../../database/database.module");
 const auth_module_1 = require("../auth/auth.module");
+const cache_module_1 = require("../cache/cache.module");
 let NutritionModule = class NutritionModule {
 };
 exports.NutritionModule = NutritionModule;
 exports.NutritionModule = NutritionModule = __decorate([
     (0, common_1.Module)({
-        imports: [database_module_1.DatabaseModule, auth_module_1.AuthModule],
+        imports: [database_module_1.DatabaseModule, auth_module_1.AuthModule, cache_module_1.CacheModuleClass],
         controllers: [nutrition_controller_1.NutritionController],
         providers: [nutrition_service_1.NutritionService],
         exports: [nutrition_service_1.NutritionService],

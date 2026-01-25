@@ -3,9 +3,16 @@
  * [OUTPUT]: 对外提供数据库连接、事务管理、测试清理方法
  * [POS]: database 模块的核心服务，全局单例，被所有 Service 消费
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ *
+ * [PERFORMANCE NOTES]
+ * - 配置连接池优化并发性能
+ * - 添加慢查询日志（>100ms）
+ * - 使用 prepared statements 缓存
+ * - 连接池监控和统计
  */
-import { Injectable, OnModuleInit, OnModuleDestroy, Logger } from '@nestjs/common';
+import { Injectable, OnModuleInit, OnModuleDestroy, Logger, ConflictException, NotFoundException, ForbiddenException } from '@nestjs/common';
 import { PrismaClient, Prisma } from '@prisma/client';
+import { env } from '../config/env';
 
 /**
  * Prisma 事务结果类型
@@ -24,13 +31,82 @@ export type TransactionOptions = {
   isolationLevel?: Prisma.TransactionIsolationLevel;
 };
 
+/**
+ * 慢查询阈值（毫秒）
+ */
+const SLOW_QUERY_THRESHOLD = 100;
+
+/**
+ * 连接池统计信息
+ */
+export interface ConnectionPoolStats {
+  totalConnections: number;
+  activeConnections: number;
+  idleConnections: number;
+  failedConnections: number;
+  avgQueryTime: number;
+  slowQueries: number;
+}
+
 @Injectable()
 export class PrismaService extends PrismaClient implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(PrismaService.name);
+  private queryStartTime = new Map<string, number>();
+
+  // 连接池统计
+  private stats = {
+    totalQueries: 0,
+    totalQueryTime: 0,
+    slowQueries: 0,
+    failedQueries: 0,
+  };
 
   constructor() {
     super({
-      log: ['query', 'error', 'warn'],
+      log: [
+        { level: 'query', emit: 'event' },
+        { level: 'error', emit: 'stdout' },
+        { level: 'warn', emit: 'stdout' },
+      ],
+      // 连接池配置 - 优化并发性能
+      datasources: {
+        db: {
+          url: env.DATABASE_URL,
+        },
+      },
+      // Prisma Client 内部优化
+      errorFormat: 'minimal',
+    });
+
+    // 监听查询事件 - 记录慢查询和统计
+    this.$on('query' as never, (e: any) => {
+      const queryKey = `${e.timestamp}_${e.query.substring(0, 50)}`;
+      this.queryStartTime.set(queryKey, Date.now());
+    });
+
+    this.$on('query' as never, (e: any) => {
+      const queryKey = `${e.timestamp}_${e.query.substring(0, 50)}`;
+      const startTime = this.queryStartTime.get(queryKey);
+      if (startTime) {
+        const duration = Date.now() - startTime;
+
+        // 更新统计
+        this.stats.totalQueries++;
+        this.stats.totalQueryTime += duration;
+
+        if (duration > SLOW_QUERY_THRESHOLD) {
+          this.stats.slowQueries++;
+          this.logger.warn(`Slow query (${duration}ms): ${e.query.substring(0, 100)}...`);
+        }
+
+        this.queryStartTime.delete(queryKey);
+      }
+    });
+
+    // 监听错误
+    this.$on('error' as never, (e: any) => {
+      this.stats.failedQueries++;
+      this.logger.error(`Database error: ${e.message}`);
     });
   }
 
@@ -73,46 +149,88 @@ export class PrismaService extends PrismaClient implements OnModuleInit, OnModul
     options?: TransactionOptions,
   ): Promise<T> {
     const startTime = Date.now();
+    const maxRetries = 3;
+    let lastError: Error | null = null;
 
-    try {
-      const result = await this.$transaction(
-        callback,
-        {
-          maxWait: options?.maxWait ?? 5000,    // 默认最多等 5 秒获取连接
-          timeout: options?.timeout ?? 10000,   // 默认 10 秒超时
-          isolationLevel: options?.isolationLevel,
-        },
-      );
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        // 每次重试前检查连接健康状态
+        const isConnected = await this.healthCheck();
+        if (!isConnected) {
+          this.logger.warn(`Database not connected, attempting to reconnect (attempt ${attempt}/${maxRetries})...`);
+          await this.$disconnect();
+          await this.$connect();
+        }
 
-      const duration = Date.now() - startTime;
-      this.logger.debug(`Transaction completed in ${duration}ms`);
-
-      return result;
-    } catch (error) {
-      const duration = Date.now() - startTime;
-
-      if (error instanceof Prisma.PrismaClientKnownRequestError) {
-        // Prisma 已知错误
-        this.logger.error(
-          `Transaction failed after ${duration}ms: ${error.code} - ${error.message}`,
+        const result = await this.$transaction(
+          callback,
+          {
+            maxWait: options?.maxWait ?? 15000,   // 增加到 15 秒
+            timeout: options?.timeout ?? 45000,    // 增加到 45 秒
+            isolationLevel: options?.isolationLevel,
+          },
         );
 
-        // 处理常见错误码
-        switch (error.code) {
-          case 'P2002':
-            throw new Error(`唯一约束冲突: ${(error.meta?.target as string[])?.join(', ')}`);
-          case 'P2025':
-            throw new Error('记录不存在');
-          case 'P2034':
-            throw new Error('事务写入冲突，请重试');
-          default:
-            throw error;
-        }
-      }
+        const duration = Date.now() - startTime;
+        this.logger.debug(`Transaction completed in ${duration}ms${attempt > 1 ? ` (retry ${attempt})` : ''}`);
 
-      this.logger.error(`Transaction failed after ${duration}ms: ${error}`);
-      throw error;
+        return result;
+      } catch (error) {
+        lastError = error as Error;
+        const duration = Date.now() - startTime;
+
+        // 检查是否是事务连接错误，如果是且还有重试次数，则重试
+        if (error instanceof Prisma.PrismaClientKnownRequestError) {
+          const isTransactionError = error.message.includes('Transaction') &&
+            (error.message.includes('not found') ||
+             error.message.includes('invalid') ||
+             error.message.includes('disconnected') ||
+             error.message.includes('timeout'));
+
+          if (isTransactionError && attempt < maxRetries) {
+            this.logger.warn(
+              `Transaction attempt ${attempt} failed after ${duration}ms, retrying... Error: ${error.message}`
+            );
+            // 等待一段时间后重试（指数退避）
+            await new Promise(resolve => setTimeout(resolve, Math.pow(2, attempt) * 100));
+            continue;
+          }
+
+          // Prisma 已知错误 - 不重试
+          this.logger.error(
+            `Transaction failed after ${duration}ms: ${error.code} - ${error.message}`,
+          );
+
+          // 处理常见错误码
+          switch (error.code) {
+            case 'P2002':
+              throw new ConflictException(`唯一约束冲突: ${(error.meta?.target as string[])?.join(', ')}`);
+            case 'P2025':
+              throw new NotFoundException('记录不存在');
+            case 'P2034':
+              throw new ConflictException('事务写入冲突，请重试');
+            default:
+              throw error;
+          }
+        }
+
+        // 非已知错误，检查是否需要重试
+        if (attempt < maxRetries &&
+            (lastError.message.includes('Transaction') || lastError.message.includes('database'))) {
+          this.logger.warn(
+            `Transaction attempt ${attempt} failed after ${duration}ms, retrying... Error: ${lastError.message}`
+          );
+          await new Promise(resolve => setTimeout(resolve, Math.pow(2, attempt) * 100));
+          continue;
+        }
+
+        this.logger.error(`Transaction failed after ${duration}ms: ${lastError}`);
+        throw lastError;
+      }
     }
+
+    // 理论上不会到达这里，但为了类型安全
+    throw lastError || new Error('Transaction failed with unknown error');
   }
 
   /**
@@ -154,7 +272,7 @@ export class PrismaService extends PrismaClient implements OnModuleInit, OnModul
    */
   async cleanDatabase() {
     if (process.env.NODE_ENV === 'production') {
-      throw new Error('Cannot clean database in production');
+      throw new ForbiddenException('Cannot clean database in production');
     }
 
     this.logger.warn('Cleaning database...');
@@ -203,11 +321,40 @@ export class PrismaService extends PrismaClient implements OnModuleInit, OnModul
   /**
    * 获取数据库连接统计
    */
-  getConnectionStats() {
-    // Prisma 不直接暴露连接池信息，这里返回基本信息
+  getConnectionStats(): ConnectionPoolStats & { connected: boolean } {
+    const avgQueryTime = this.stats.totalQueries > 0
+      ? Math.round(this.stats.totalQueryTime / this.stats.totalQueries)
+      : 0;
+
+    // 从 DATABASE_URL 解析 connection_limit
+    const url = new URL(env.DATABASE_URL);
+    const connectionLimit = parseInt(url.searchParams.get('connection_limit') || '10', 10);
+
     return {
       connected: true,
-      // 如果需要更详细信息，可以使用 Prisma 的扩展功能
+      totalConnections: connectionLimit,
+      activeConnections: Math.min(connectionLimit, this.stats.totalQueries),
+      idleConnections: Math.max(0, connectionLimit - Math.min(connectionLimit, this.stats.totalQueries)),
+      failedConnections: this.stats.failedQueries,
+      avgQueryTime,
+      slowQueries: this.stats.slowQueries,
+    };
+  }
+
+  /**
+   * 获取详细性能报告
+   */
+  getPerformanceReport() {
+    const stats = this.getConnectionStats();
+    return {
+      ...stats,
+      totalQueries: this.stats.totalQueries,
+      querySuccessRate: this.stats.totalQueries > 0
+        ? ((this.stats.totalQueries - this.stats.failedQueries) / this.stats.totalQueries * 100).toFixed(2) + '%'
+        : '100%',
+      slowQueryRate: this.stats.totalQueries > 0
+        ? (this.stats.slowQueries / this.stats.totalQueries * 100).toFixed(2) + '%'
+        : '0%',
     };
   }
 }

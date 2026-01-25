@@ -4,9 +4,10 @@
  * [POS]: Swagger API 文档配置
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
-import { INestApplication } from '@nestjs/common';
+import { INestApplication, Logger } from '@nestjs/common';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { env } from '../env';
+import type { OpenAPIObject } from '@nestjs/swagger';
 
 /**
  * Swagger 配置选项
@@ -152,12 +153,12 @@ export function createSwaggerConfig(options?: Partial<SwaggerConfigOptions>) {
 /**
  * 在应用中设置 Swagger
  */
-export function setupSwagger(app: INestApplication, document: any): void {
+export function setupSwagger(app: INestApplication, document: Omit<OpenAPIObject, 'paths'>): void {
   if (!env.SWAGGER_ENABLED) {
     return;
   }
 
-  SwaggerModule.setup(env.SWAGGER_PATH, app, document, {
+  SwaggerModule.setup(env.SWAGGER_PATH, app, document as OpenAPIObject, {
     swaggerOptions: {
       persistAuthorization: true,
       displayRequestDuration: true,
@@ -178,5 +179,6 @@ export function setupSwagger(app: INestApplication, document: any): void {
     `,
   });
 
-  console.log(`📚 Swagger documentation available at: http://localhost:${env.PORT}/${env.SWAGGER_PATH}`);
+  const logger = new Logger('Swagger');
+  logger.log(`📚 Swagger documentation available at: http://localhost:${env.PORT}/${env.SWAGGER_PATH}`);
 }

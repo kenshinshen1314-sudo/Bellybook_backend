@@ -19,85 +19,43 @@ let LeaderboardQuery = class LeaderboardQuery {
         this.prisma = prisma;
     }
     async execute(period, tier) {
-        const { startDate } = this.getDateRange(period);
-        const mealCounts = await this.prisma.meal.groupBy({
-            by: ['userId'],
-            where: this.buildMealWhere(startDate),
-            _count: { id: true },
-            _sum: { calories: true },
-        });
-        const uniqueCuisineCounts = await this.prisma.$queryRaw `
-      SELECT "userId", COUNT(DISTINCT "cuisine") as count
-      FROM "meals"
-      WHERE "deletedAt" IS NULL
-        ${startDate ? client_1.Prisma.sql `AND "createdAt" >= ${startDate}` : client_1.Prisma.empty}
-      GROUP BY "userId"
+        const { startDate, startDateCondition } = this.getDateRangeSql(period);
+        const rankings = await this.prisma.$queryRaw `
+      SELECT
+        u.id as "userId",
+        u.username,
+        u."avatarUrl",
+        COUNT(m.id) as "mealCount",
+        COUNT(DISTINCT m.cuisine) as "cuisineCount",
+        (COUNT(m.id) * 10 + COUNT(DISTINCT m.cuisine) * 50) as "score"
+      FROM users u
+      LEFT JOIN meals m ON m."userId" = u.id
+        AND m."deletedAt" IS NULL
+        ${startDateCondition}
+      LEFT JOIN user_settings us ON us."userId" = u.id
+      WHERE u."deletedAt" IS NULL
+        AND (us.id IS NULL OR us."hideRanking" = false)
+        ${tier ? client_1.Prisma.sql `AND u."subscriptionTier" = ${tier}` : client_1.Prisma.empty}
+      GROUP BY u.id, u.username, u."avatarUrl"
+      HAVING COUNT(m.id) > 0
+      ORDER BY "score" DESC, "mealCount" DESC
+      LIMIT 100
     `;
-        const userMap = await this.getUserMap(tier);
-        const mealCountMap = new Map(mealCounts.map(m => [m.userId, m._count.id]));
-        const cuisineCountMap = new Map(uniqueCuisineCounts.map(m => [m.userId, Number(m.count)]));
-        const rankings = [];
-        for (const [userId, mealCount] of mealCountMap) {
-            const user = userMap.get(userId);
-            if (!user)
-                continue;
-            const cuisineCount = cuisineCountMap.get(userId) || 0;
-            const score = mealCount * 10 + cuisineCount * 50;
-            rankings.push({
-                rank: 0,
-                userId,
-                username: user.username,
-                avatarUrl: user.avatarUrl,
-                score,
-                mealCount,
-                cuisineCount,
-            });
-        }
-        rankings.sort((a, b) => b.score - a.score);
-        rankings.forEach((r, index) => { r.rank = index + 1; });
         return {
             period,
             tier,
-            leaderboard: rankings.slice(0, 100),
+            leaderboard: rankings.map((r, index) => ({
+                rank: index + 1,
+                userId: r.userId,
+                username: r.username,
+                avatarUrl: r.avatarUrl,
+                score: Number(r.score),
+                mealCount: Number(r.mealCount),
+                cuisineCount: Number(r.cuisineCount),
+            })),
         };
     }
-    buildMealWhere(startDate) {
-        const where = {
-            deletedAt: null,
-            users: {
-                OR: [
-                    { user_settings: { is: null } },
-                    { user_settings: { hideRanking: false } },
-                ],
-            },
-        };
-        if (startDate) {
-            where.createdAt = { gte: startDate };
-        }
-        return where;
-    }
-    async getUserMap(tier) {
-        const where = {
-            deletedAt: null,
-            OR: [
-                { user_settings: { is: null } },
-                { user_settings: { hideRanking: false } },
-            ],
-        };
-        if (tier) {
-            where.subscriptionTier = tier;
-        }
-        const users = await this.prisma.user.findMany({
-            where,
-            select: {
-                id: true,
-                username: true,
-                avatarUrl: true,
-            },
-        });
-        return new Map(users.map(u => [u.id, { username: u.username, avatarUrl: u.avatarUrl }]));
-    }
-    getDateRange(period) {
+    getDateRangeSql(period) {
         const now = new Date();
         let startDate;
         switch (period) {
@@ -118,7 +76,10 @@ let LeaderboardQuery = class LeaderboardQuery {
                 startDate = undefined;
                 break;
         }
-        return { startDate };
+        const startDateCondition = startDate
+            ? client_1.Prisma.sql `AND m."createdAt" >= ${startDate}`
+            : client_1.Prisma.empty;
+        return { startDate, startDateCondition };
     }
 };
 exports.LeaderboardQuery = LeaderboardQuery;

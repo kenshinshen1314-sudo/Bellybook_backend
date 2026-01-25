@@ -19,6 +19,7 @@ const ranking_optimized_service_1 = require("./ranking-optimized.service");
 const jwt_auth_guard_1 = require("../../common/guards/jwt-auth.guard");
 const ranking_query_dto_1 = require("./dto/ranking-query.dto");
 const ranking_response_dto_1 = require("./dto/ranking-response.dto");
+const cache_interceptor_1 = require("../../common/interceptors/cache.interceptor");
 let RankingController = class RankingController {
     rankingService;
     constructor(rankingService) {
@@ -39,14 +40,18 @@ let RankingController = class RankingController {
     async getDishExperts(period = ranking_query_dto_1.RankingPeriod.ALL_TIME) {
         return this.rankingService.getDishExperts(period);
     }
-    async getCuisineExpertDetail(userId, cuisineName, period = ranking_query_dto_1.RankingPeriod.ALL_TIME) {
-        return this.rankingService.getCuisineExpertDetail(userId, cuisineName, period);
+    async getCuisineExpertDetail(userId, cuisineName, period = ranking_query_dto_1.RankingPeriod.ALL_TIME, limit, offset) {
+        const validatedLimit = Math.min(Math.max(limit || 50, 1), 100);
+        const validatedOffset = Math.max(offset || 0, 0);
+        return this.rankingService.getCuisineExpertDetail(userId, cuisineName, period, validatedLimit, validatedOffset);
     }
     async getAllUsersDishes(period = ranking_query_dto_1.RankingPeriod.WEEKLY) {
         return this.rankingService.getAllUsersDishes(period);
     }
-    async getUserUnlockedDishes(userId) {
-        return this.rankingService.getUserUnlockedDishes(userId);
+    async getUserUnlockedDishes(userId, limit, offset) {
+        const validatedLimit = Math.min(Math.max(limit || 50, 1), 100);
+        const validatedOffset = Math.max(offset || 0, 0);
+        return this.rankingService.getUserUnlockedDishes(userId, validatedLimit, validatedOffset);
     }
 };
 exports.RankingController = RankingController;
@@ -74,6 +79,7 @@ __decorate([
         description: '获取成功',
         type: ranking_response_dto_1.CuisineMastersDto,
     }),
+    (0, cache_interceptor_1.Cache)(cache_interceptor_1.CacheTTL.FIVE_MINUTES),
     __param(0, (0, common_1.Query)('cuisineName')),
     __param(1, (0, common_1.Query)('period')),
     __metadata("design:type", Function),
@@ -104,6 +110,7 @@ __decorate([
         description: '获取成功',
         type: ranking_response_dto_1.LeaderboardDto,
     }),
+    (0, cache_interceptor_1.Cache)(cache_interceptor_1.CacheTTL.FIVE_MINUTES),
     __param(0, (0, common_1.Query)('period')),
     __param(1, (0, common_1.Query)('tier')),
     __metadata("design:type", Function),
@@ -128,6 +135,7 @@ __decorate([
         description: '获取成功',
         type: ranking_response_dto_1.RankingStatsDto,
     }),
+    (0, cache_interceptor_1.Cache)(cache_interceptor_1.CacheTTL.FIVE_MINUTES),
     __param(0, (0, common_1.Query)('period')),
     __metadata("design:type", Function),
     __metadata("design:paramtypes", [String]),
@@ -151,6 +159,7 @@ __decorate([
         description: '获取成功',
         type: ranking_response_dto_1.GourmetsDto,
     }),
+    (0, cache_interceptor_1.Cache)(cache_interceptor_1.CacheTTL.FIVE_MINUTES),
     __param(0, (0, common_1.Query)('period')),
     __metadata("design:type", Function),
     __metadata("design:paramtypes", [String]),
@@ -174,6 +183,7 @@ __decorate([
         description: '获取成功',
         type: ranking_response_dto_1.DishExpertsDto,
     }),
+    (0, cache_interceptor_1.Cache)(cache_interceptor_1.CacheTTL.FIVE_MINUTES),
     __param(0, (0, common_1.Query)('period')),
     __metadata("design:type", Function),
     __metadata("design:paramtypes", [String]),
@@ -183,7 +193,7 @@ __decorate([
     (0, common_1.Get)('cuisine-expert-detail'),
     (0, swagger_1.ApiOperation)({
         summary: '获取菜系专家详情',
-        description: '展示指定用户在指定菜系下的所有菜品记录',
+        description: '展示指定用户在指定菜系下的所有菜品记录（支持分页）',
     }),
     (0, swagger_1.ApiQuery)({
         name: 'userId',
@@ -204,6 +214,18 @@ __decorate([
         enum: ['WEEKLY', 'MONTHLY', 'YEARLY', 'ALL_TIME'],
         example: 'ALL_TIME',
     }),
+    (0, swagger_1.ApiQuery)({
+        name: 'limit',
+        description: '每页条目数（1-100）',
+        required: false,
+        example: 50,
+    }),
+    (0, swagger_1.ApiQuery)({
+        name: 'offset',
+        description: '偏移量',
+        required: false,
+        example: 0,
+    }),
     (0, swagger_1.ApiResponse)({
         status: 200,
         description: '获取成功',
@@ -223,8 +245,10 @@ __decorate([
     __param(0, (0, common_1.Query)('userId')),
     __param(1, (0, common_1.Query)('cuisineName')),
     __param(2, (0, common_1.Query)('period')),
+    __param(3, (0, common_1.Query)('limit')),
+    __param(4, (0, common_1.Query)('offset')),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", [String, String, String]),
+    __metadata("design:paramtypes", [String, String, String, Number, Number]),
     __metadata("design:returntype", Promise)
 ], RankingController.prototype, "getCuisineExpertDetail", null);
 __decorate([
@@ -254,13 +278,25 @@ __decorate([
     (0, common_1.Get)('user-unlocked-dishes'),
     (0, swagger_1.ApiOperation)({
         summary: '获取用户已解锁的菜肴',
-        description: '展示用户所有已解锁的菜肴列表',
+        description: '展示用户所有已解锁的菜肴列表（支持分页）',
     }),
     (0, swagger_1.ApiQuery)({
         name: 'userId',
         description: '用户 ID',
         required: true,
         example: 'cm1234567890',
+    }),
+    (0, swagger_1.ApiQuery)({
+        name: 'limit',
+        description: '每页条目数（1-100）',
+        required: false,
+        example: 50,
+    }),
+    (0, swagger_1.ApiQuery)({
+        name: 'offset',
+        description: '偏移量',
+        required: false,
+        example: 0,
     }),
     (0, swagger_1.ApiResponse)({
         status: 200,
@@ -279,8 +315,10 @@ __decorate([
         },
     }),
     __param(0, (0, common_1.Query)('userId')),
+    __param(1, (0, common_1.Query)('limit')),
+    __param(2, (0, common_1.Query)('offset')),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", [String]),
+    __metadata("design:paramtypes", [String, Number, Number]),
     __metadata("design:returntype", Promise)
 ], RankingController.prototype, "getUserUnlockedDishes", null);
 exports.RankingController = RankingController = __decorate([

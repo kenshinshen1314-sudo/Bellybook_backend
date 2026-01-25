@@ -1,13 +1,15 @@
 
 import { PrismaClient } from '@prisma/client';
+import { Logger } from '@nestjs/common';
 
 const prisma = new PrismaClient();
+const logger = new Logger('BackfillDishUnlocks');
 
 async function main() {
-    console.log('Starting backfill of dish_unlocks...');
+    logger.log('Starting backfill of dish_unlocks...');
 
     // 1. Fetch all relevant meal data
-    console.log('Fetching all meals...');
+    logger.log('Fetching all meals...');
     const meals = await prisma.meal.findMany({
         where: {
             deletedAt: null,
@@ -22,7 +24,7 @@ async function main() {
         },
     });
 
-    console.log(`Found ${meals.length} meals. Processing...`);
+    logger.log(`Found ${meals.length} meals. Processing...`);
 
     // 2. Aggregate data in memory
     // Key: `${userId}:${foodName}`
@@ -58,7 +60,7 @@ async function main() {
         }
     }
 
-    console.log(`Identified ${statsMap.size} unique user-dish pairs.`);
+    logger.log(`Identified ${statsMap.size} unique user-dish pairs.`);
 
     // 3. Write to database
     let processed = 0;
@@ -88,16 +90,16 @@ async function main() {
 
         processed++;
         if (processed % 50 === 0) {
-            console.log(`Processed ${processed}/${total}...`);
+            logger.log(`Processed ${processed}/${total}...`);
         }
     }
 
-    console.log('Backfill completed successfully!');
+    logger.log('Backfill completed successfully!');
 }
 
 main()
     .catch((e) => {
-        console.error(e);
+        logger.error(e);
         process.exit(1);
     })
     .finally(async () => {

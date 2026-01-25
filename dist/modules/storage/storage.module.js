@@ -16,6 +16,7 @@ const auth_module_1 = require("../auth/auth.module");
 const ai_module_1 = require("../ai/ai.module");
 const meals_module_1 = require("../meals/meals.module");
 const users_module_1 = require("../users/users.module");
+const queue_module_1 = require("../queue/queue.module");
 const env_1 = require("../../config/env");
 const multer_1 = require("multer");
 let StorageModule = class StorageModule {
@@ -29,6 +30,7 @@ exports.StorageModule = StorageModule = __decorate([
             ai_module_1.AiModule,
             meals_module_1.MealsModule,
             users_module_1.UsersModule,
+            queue_module_1.QueueModule,
             platform_express_1.MulterModule.register({
                 storage: (0, multer_1.memoryStorage)(),
                 limits: {

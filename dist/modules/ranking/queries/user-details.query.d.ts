@@ -4,8 +4,8 @@ import { CuisineExpertDetailDto, AllUsersDishesDto, UserUnlockedDishesDto } from
 export declare class UserDetailsQuery {
     private prisma;
     constructor(prisma: PrismaService);
-    getCuisineExpertDetail(userId: string, cuisineName: string, period: RankingPeriod): Promise<CuisineExpertDetailDto>;
+    getCuisineExpertDetail(userId: string, cuisineName: string, period: RankingPeriod, limit?: number, offset?: number): Promise<CuisineExpertDetailDto>;
     getAllUsersDishes(period: RankingPeriod): Promise<AllUsersDishesDto>;
-    getUserUnlockedDishes(userId: string): Promise<UserUnlockedDishesDto>;
-    private getDateRange;
+    getUserUnlockedDishes(userId: string, limit?: number, offset?: number): Promise<UserUnlockedDishesDto>;
+    private getDateRangeSql;
 }

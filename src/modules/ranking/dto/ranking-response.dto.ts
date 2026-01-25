@@ -203,6 +203,15 @@ export class CuisineExpertDetailDto {
 
   @ApiProperty({ description: '菜品列表', type: [CuisineExpertDishEntry] })
   dishes!: CuisineExpertDishEntry[];
+
+  @ApiProperty({ description: '分页：当前页偏移量', required: false })
+  offset?: number;
+
+  @ApiProperty({ description: '分页：每页条目数', required: false })
+  limit?: number;
+
+  @ApiProperty({ description: '分页：是否有更多数据', required: false })
+  hasMore?: boolean;
 }
 
 /**
@@ -279,7 +288,7 @@ export class UnlockedDishEntry {
 }
 
 /**
- * 用户已解锁菜肴响应
+ * 用户已解锁菜肴响应（支持分页）
  */
 export class UserUnlockedDishesDto {
   @ApiProperty({ description: '用户 ID', example: 'cm1234567890' })
@@ -299,4 +308,13 @@ export class UserUnlockedDishesDto {
 
   @ApiProperty({ description: '已解锁菜品列表', type: [UnlockedDishEntry] })
   dishes!: UnlockedDishEntry[];
+
+  @ApiProperty({ description: '分页：当前页偏移量', required: false })
+  offset?: number;
+
+  @ApiProperty({ description: '分页：每页条目数', required: false })
+  limit?: number;
+
+  @ApiProperty({ description: '分页：是否有更多数据', required: false })
+  hasMore?: boolean;
 }

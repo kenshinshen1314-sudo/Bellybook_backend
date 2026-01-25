@@ -80,6 +80,9 @@ export declare class CuisineExpertDetailDto {
     totalDishes: number;
     totalMeals: number;
     dishes: CuisineExpertDishEntry[];
+    offset?: number;
+    limit?: number;
+    hasMore?: boolean;
 }
 export declare class UserCuisineStats {
     rank: number;
@@ -114,4 +117,7 @@ export declare class UserUnlockedDishesDto {
     totalDishes: number;
     totalMeals: number;
     dishes: UnlockedDishEntry[];
+    offset?: number;
+    limit?: number;
+    hasMore?: boolean;
 }

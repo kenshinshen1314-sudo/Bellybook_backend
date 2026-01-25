@@ -11,6 +11,7 @@ const common_1 = require("@nestjs/common");
 const config_1 = require("@nestjs/config");
 const throttler_1 = require("@nestjs/throttler");
 const core_1 = require("@nestjs/core");
+const core_2 = require("@nestjs/core");
 const app_controller_1 = require("./app.controller");
 const app_service_1 = require("./app.service");
 const database_module_1 = require("./database/database.module");
@@ -23,7 +24,10 @@ const sync_module_1 = require("./modules/sync/sync.module");
 const storage_module_1 = require("./modules/storage/storage.module");
 const ranking_module_1 = require("./modules/ranking/ranking.module");
 const cache_module_1 = require("./modules/cache/cache.module");
+const bull_queue_module_1 = require("./modules/queue/bull-queue.module");
+const middleware_module_1 = require("./common/middleware/middleware.module");
 const jwt_auth_guard_1 = require("./common/guards/jwt-auth.guard");
+const cache_interceptor_1 = require("./common/interceptors/cache.interceptor");
 const env_1 = require("./config/env");
 let AppModule = class AppModule {
 };
@@ -38,7 +42,9 @@ exports.AppModule = AppModule = __decorate([
                     ttl: env_1.env.RATE_LIMIT_TTL * 1000,
                     limit: env_1.env.RATE_LIMIT_MAX,
                 }]),
+            middleware_module_1.MiddlewareModule,
             cache_module_1.CacheModuleClass,
+            bull_queue_module_1.BullQueueModule,
             database_module_1.DatabaseModule,
             auth_module_1.AuthModule,
             users_module_1.UsersModule,
@@ -56,6 +62,11 @@ exports.AppModule = AppModule = __decorate([
                 provide: core_1.APP_GUARD,
                 useClass: jwt_auth_guard_1.JwtAuthGuard,
             },
+            {
+                provide: core_1.APP_INTERCEPTOR,
+                useClass: cache_interceptor_1.CacheInterceptor,
+            },
+            core_2.Reflector,
         ],
     })
 ], AppModule);

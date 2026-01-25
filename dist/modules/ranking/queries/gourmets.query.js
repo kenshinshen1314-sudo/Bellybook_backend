@@ -19,58 +19,40 @@ let GourmetsQuery = class GourmetsQuery {
         this.prisma = prisma;
     }
     async execute(period) {
-        const { startDate } = this.getDateRange(period);
-        const stats = await this.prisma.$queryRaw `
+        const { startDate, startDateCondition } = this.getDateRangeSql(period);
+        const gourmets = await this.prisma.$queryRaw `
       SELECT
-        "userId",
-        COUNT(DISTINCT "cuisine") as "cuisineCount",
-        COUNT(*) as "mealCount"
-      FROM "meals"
-      WHERE "deletedAt" IS NULL
-        ${startDate ? client_1.Prisma.sql `AND "createdAt" >= ${startDate}` : client_1.Prisma.empty}
-      GROUP BY "userId"
+        u.id as "userId",
+        u.username,
+        u."avatarUrl",
+        COUNT(DISTINCT m.cuisine) as "cuisineCount",
+        COUNT(m.id) as "mealCount"
+      FROM users u
+      INNER JOIN meals m ON m."userId" = u.id
+        AND m."deletedAt" IS NULL
+        ${startDateCondition}
+      LEFT JOIN user_settings us ON us."userId" = u.id
+      WHERE u."deletedAt" IS NULL
+        AND (us.id IS NULL OR us."hideRanking" = false)
+      GROUP BY u.id, u.username, u."avatarUrl"
+      HAVING COUNT(DISTINCT m.cuisine) > 0
+      ORDER BY "cuisineCount" DESC
+      LIMIT 100
     `;
-        const userMap = await this.getUserMap();
-        const gourmets = [];
-        for (const stat of stats) {
-            const user = userMap.get(stat.userId);
-            if (!user)
-                continue;
-            gourmets.push({
-                rank: 0,
-                userId: stat.userId,
-                username: user.username,
-                avatarUrl: user.avatarUrl,
-                cuisineCount: Number(stat.cuisineCount),
-                mealCount: Number(stat.mealCount),
-                cuisines: [],
-            });
-        }
-        gourmets.sort((a, b) => b.cuisineCount - a.cuisineCount);
-        gourmets.forEach((g, index) => { g.rank = index + 1; });
         return {
             period,
-            gourmets: gourmets.slice(0, 100),
+            gourmets: gourmets.map((r, index) => ({
+                rank: index + 1,
+                userId: r.userId,
+                username: r.username,
+                avatarUrl: r.avatarUrl,
+                cuisineCount: Number(r.cuisineCount),
+                mealCount: Number(r.mealCount),
+                cuisines: [],
+            })),
         };
     }
-    async getUserMap() {
-        const users = await this.prisma.user.findMany({
-            where: {
-                deletedAt: null,
-                OR: [
-                    { user_settings: { is: null } },
-                    { user_settings: { hideRanking: false } },
-                ],
-            },
-            select: {
-                id: true,
-                username: true,
-                avatarUrl: true,
-            },
-        });
-        return new Map(users.map(u => [u.id, { username: u.username, avatarUrl: u.avatarUrl }]));
-    }
-    getDateRange(period) {
+    getDateRangeSql(period) {
         const now = new Date();
         let startDate;
         switch (period) {
@@ -91,7 +73,10 @@ let GourmetsQuery = class GourmetsQuery {
                 startDate = undefined;
                 break;
         }
-        return { startDate };
+        const startDateCondition = startDate
+            ? client_1.Prisma.sql `AND m."createdAt" >= ${startDate}`
+            : client_1.Prisma.empty;
+        return { startDate, startDateCondition };
     }
 };
 exports.GourmetsQuery = GourmetsQuery;

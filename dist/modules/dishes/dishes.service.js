@@ -13,11 +13,19 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.DishesService = void 0;
 const common_1 = require("@nestjs/common");
 const prisma_service_1 = require("../../database/prisma.service");
+const cache_service_1 = require("../cache/cache.service");
+const cache_stats_service_1 = require("../cache/cache-stats.service");
+const cache_decorator_1 = require("../cache/cache.decorator");
+const cache_constants_1 = require("../cache/cache.constants");
 let DishesService = DishesService_1 = class DishesService {
     prisma;
+    cacheService;
+    cacheStatsService;
     logger = new common_1.Logger(DishesService_1.name);
-    constructor(prisma) {
+    constructor(prisma, cacheService, cacheStatsService) {
         this.prisma = prisma;
+        this.cacheService = cacheService;
+        this.cacheStatsService = cacheStatsService;
     }
     async findOrCreateAndUpdate(input) {
         return this.prisma.runTransaction(async (tx) => {
@@ -90,8 +98,22 @@ let DishesService = DishesService_1 = class DishesService {
     }
 };
 exports.DishesService = DishesService;
+__decorate([
+    (0, cache_decorator_1.Cacheable)(cache_constants_1.CachePrefix.DISH_INFO, ['limit', 'cuisine'], cache_constants_1.CacheTTL.LONG),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Number, String]),
+    __metadata("design:returntype", Promise)
+], DishesService.prototype, "getPopularDishes", null);
+__decorate([
+    (0, cache_decorator_1.Cacheable)(cache_constants_1.CachePrefix.DISH_INFO, ['name'], cache_constants_1.CacheTTL.LONG),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [String]),
+    __metadata("design:returntype", Promise)
+], DishesService.prototype, "getDishByName", null);
 exports.DishesService = DishesService = DishesService_1 = __decorate([
     (0, common_1.Injectable)(),
-    __metadata("design:paramtypes", [prisma_service_1.PrismaService])
+    __metadata("design:paramtypes", [prisma_service_1.PrismaService,
+        cache_service_1.CacheService,
+        cache_stats_service_1.CacheStatsService])
 ], DishesService);
 //# sourceMappingURL=dishes.service.js.map

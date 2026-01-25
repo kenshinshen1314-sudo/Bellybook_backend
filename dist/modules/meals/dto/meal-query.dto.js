@@ -12,6 +12,12 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.MealQueryDto = void 0;
 const class_validator_1 = require("class-validator");
 const class_transformer_1 = require("class-transformer");
+const ISO_DATE_REGEX = /^\d{4}-\d{2}-\d{2}$/;
+function IsDateFormat() {
+    return function (target, propertyKey) {
+        (0, class_validator_1.IsDateString)()(target, propertyKey);
+    };
+}
 class MealQueryDto {
     page = 1;
     limit = 20;
@@ -36,6 +42,7 @@ __decorate([
     (0, class_transformer_1.Type)(() => Number),
     (0, class_validator_1.IsInt)(),
     (0, class_validator_1.Min)(1),
+    (0, class_validator_1.Max)(100),
     __metadata("design:type", Number)
 ], MealQueryDto.prototype, "limit", void 0);
 __decorate([
@@ -47,17 +54,23 @@ __decorate([
 ], MealQueryDto.prototype, "offset", void 0);
 __decorate([
     (0, class_validator_1.IsOptional)(),
-    (0, class_validator_1.IsEnum)(['BREAKFAST', 'LUNCH', 'DINNER', 'SNACK']),
+    (0, class_validator_1.IsEnum)(['BREAKFAST', 'LUNCH', 'DINNER', 'SNACK'], {
+        message: 'mealType must be one of: BREAKFAST, LUNCH, DINNER, SNACK'
+    }),
     __metadata("design:type", String)
 ], MealQueryDto.prototype, "mealType", void 0);
 __decorate([
     (0, class_validator_1.IsOptional)(),
-    (0, class_validator_1.IsString)(),
+    (0, class_validator_1.IsDateString)({}, {
+        message: 'startDate must be a valid ISO 8601 date string (YYYY-MM-DD)'
+    }),
     __metadata("design:type", String)
 ], MealQueryDto.prototype, "startDate", void 0);
 __decorate([
     (0, class_validator_1.IsOptional)(),
-    (0, class_validator_1.IsString)(),
+    (0, class_validator_1.IsDateString)({}, {
+        message: 'endDate must be a valid ISO 8601 date string (YYYY-MM-DD)'
+    }),
     __metadata("design:type", String)
 ], MealQueryDto.prototype, "endDate", void 0);
 __decorate([
@@ -67,12 +80,16 @@ __decorate([
 ], MealQueryDto.prototype, "cuisine", void 0);
 __decorate([
     (0, class_validator_1.IsOptional)(),
-    (0, class_validator_1.IsEnum)(['createdAt', 'calories', 'protein']),
+    (0, class_validator_1.IsEnum)(['createdAt', 'calories', 'protein'], {
+        message: 'sortBy must be one of: createdAt, calories, protein'
+    }),
     __metadata("design:type", String)
 ], MealQueryDto.prototype, "sortBy", void 0);
 __decorate([
     (0, class_validator_1.IsOptional)(),
-    (0, class_validator_1.IsEnum)(['asc', 'desc']),
+    (0, class_validator_1.IsEnum)(['asc', 'desc'], {
+        message: 'sortOrder must be either "asc" or "desc"'
+    }),
     __metadata("design:type", String)
 ], MealQueryDto.prototype, "sortOrder", void 0);
 //# sourceMappingURL=meal-query.dto.js.map

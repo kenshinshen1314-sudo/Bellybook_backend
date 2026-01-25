@@ -12,10 +12,14 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.NutritionService = void 0;
 const common_1 = require("@nestjs/common");
 const prisma_service_1 = require("../../database/prisma.service");
+const cache_service_1 = require("../cache/cache.service");
+const cache_constants_1 = require("../cache/cache.constants");
 let NutritionService = class NutritionService {
     prisma;
-    constructor(prisma) {
+    cacheService;
+    constructor(prisma, cacheService) {
         this.prisma = prisma;
+        this.cacheService = cacheService;
     }
     async getDaily(userId, date) {
         const queryDate = date || new Date();
@@ -23,6 +27,15 @@ let NutritionService = class NutritionService {
         startOfDay.setHours(0, 0, 0, 0);
         const endOfDay = new Date(startOfDay);
         endOfDay.setDate(endOfDay.getDate() + 1);
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        const isToday = startOfDay.getTime() === today.getTime();
+        const cacheKey = `${cache_constants_1.CachePrefix.DAILY_NUTRITION}:${userId}:${startOfDay.toISOString().split('T')[0]}`;
+        if (!isToday) {
+            const cached = await this.cacheService.get(cacheKey);
+            if (cached)
+                return cached;
+        }
         const [daily, meals] = await Promise.all([
             this.prisma.daily_nutritions.findUnique({
                 where: {
@@ -35,10 +48,23 @@ let NutritionService = class NutritionService {
                     createdAt: { gte: startOfDay, lt: endOfDay },
                     deletedAt: null,
                 },
+                select: {
+                    id: true,
+                    userId: true,
+                    imageUrl: true,
+                    thumbnailUrl: true,
+                    analysis: true,
+                    mealType: true,
+                    notes: true,
+                    createdAt: true,
+                    updatedAt: true,
+                    isSynced: true,
+                    version: true,
+                },
                 orderBy: { createdAt: 'desc' },
             }),
         ]);
-        return {
+        const result = {
             date: startOfDay.toISOString().split('T')[0],
             totalCalories: daily?.totalCalories || 0,
             totalProtein: daily?.totalProtein || 0,
@@ -52,8 +78,24 @@ let NutritionService = class NutritionService {
             lunchCount: daily?.lunchCount || 0,
             dinnerCount: daily?.dinnerCount || 0,
             snackCount: daily?.snackCount || 0,
-            meals: meals.map(m => this.mapToMealResponse(m)),
+            meals: meals.map(m => ({
+                id: m.id,
+                userId: m.userId,
+                imageUrl: m.imageUrl,
+                thumbnailUrl: m.thumbnailUrl ?? undefined,
+                analysis: m.analysis,
+                mealType: m.mealType,
+                notes: m.notes ?? undefined,
+                createdAt: m.createdAt,
+                updatedAt: m.updatedAt,
+                isSynced: m.isSynced,
+                version: m.version,
+            })),
         };
+        if (!isToday) {
+            await this.cacheService.set(cacheKey, result, cache_constants_1.CacheTTL.LONG);
+        }
+        return result;
     }
     async getWeekly(userId, startDate, endDate) {
         const end = endDate || new Date();
@@ -91,6 +133,10 @@ let NutritionService = class NutritionService {
         };
     }
     async getSummary(userId, period = 'week') {
+        const cacheKey = `${cache_constants_1.CachePrefix.DAILY_NUTRITION}:summary:${userId}:${period}`;
+        const cached = await this.cacheService.get(cacheKey);
+        if (cached)
+            return cached;
         const now = new Date();
         let startDate = new Date(now);
         switch (period) {
@@ -107,14 +153,29 @@ let NutritionService = class NutritionService {
                 startDate = new Date(0);
                 break;
         }
-        const [meals, dailies] = await Promise.all([
-            this.prisma.meal.findMany({
+        const [cuisineStats, mealStats, dailies] = await Promise.all([
+            this.prisma.meal.groupBy({
+                by: ['cuisine'],
                 where: {
                     userId,
                     createdAt: { gte: startDate, lte: now },
                     deletedAt: null,
                 },
+                _count: { id: true },
+                orderBy: { _count: { id: 'desc' } },
+                take: 10,
             }),
+            this.prisma.$queryRaw `
+        SELECT "foodName", "cuisine", COUNT(*) as count
+        FROM meals
+        WHERE "userId" = ${userId}
+          AND "createdAt" >= ${startDate}
+          AND "createdAt" <= ${now}
+          AND "deletedAt" IS NULL
+        GROUP BY "foodName", "cuisine"
+        ORDER BY count DESC
+        LIMIT 10
+      `,
             this.prisma.daily_nutritions.findMany({
                 where: {
                     userId,
@@ -122,39 +183,20 @@ let NutritionService = class NutritionService {
                 },
             }),
         ]);
-        const totalMeals = meals.length;
+        const totalMeals = cuisineStats.reduce((sum, c) => sum + c._count.id, 0);
         const totalCalories = this.sum(dailies.map(d => d.totalCalories));
         const daysCount = dailies.length || 1;
-        const cuisineCounts = new Map();
-        const mealCounts = new Map();
-        for (const meal of meals) {
-            const cuisine = meal.cuisine;
-            cuisineCounts.set(cuisine, (cuisineCounts.get(cuisine) || 0) + 1);
-            const key = `${meal.foodName}-${cuisine}`;
-            const existing = mealCounts.get(key);
-            if (existing) {
-                existing.count++;
-            }
-            else {
-                mealCounts.set(key, { cuisine, count: 1 });
-            }
-        }
-        const topCuisines = Array.from(cuisineCounts.entries())
-            .map(([name, count]) => ({
-            name,
-            count,
-            percentage: totalMeals > 0 ? (count / totalMeals) * 100 : 0,
-        }))
-            .sort((a, b) => b.count - a.count)
-            .slice(0, 10);
-        const topMeals = Array.from(mealCounts.entries())
-            .map(([key, { cuisine, count }]) => {
-            const [foodName] = key.split('-');
-            return { foodName, cuisine, count };
-        })
-            .sort((a, b) => b.count - a.count)
-            .slice(0, 10);
-        return {
+        const topCuisines = cuisineStats.map(c => ({
+            name: c.cuisine,
+            count: c._count.id,
+            percentage: totalMeals > 0 ? (c._count.id / totalMeals) * 100 : 0,
+        }));
+        const topMeals = mealStats.map(m => ({
+            foodName: m.food_name,
+            cuisine: m.cuisine,
+            count: Number(m.count),
+        }));
+        const result = {
             period,
             startDate: startDate.toISOString().split('T')[0],
             endDate: now.toISOString().split('T')[0],
@@ -169,6 +211,9 @@ let NutritionService = class NutritionService {
             topCuisines,
             topMeals,
         };
+        const ttl = period === 'week' ? cache_constants_1.CacheTTL.MEDIUM : cache_constants_1.CacheTTL.LONG;
+        await this.cacheService.set(cacheKey, result, ttl);
+        return result;
     }
     async getAverages(userId, period = 'week') {
         const now = new Date();
@@ -216,10 +261,10 @@ let NutritionService = class NutritionService {
             id: meal.id,
             userId: meal.userId,
             imageUrl: meal.imageUrl,
-            thumbnailUrl: meal.thumbnailUrl,
+            thumbnailUrl: meal.thumbnailUrl ?? undefined,
             analysis: meal.analysis,
             mealType: meal.mealType,
-            notes: meal.notes,
+            notes: meal.notes ?? undefined,
             createdAt: meal.createdAt,
             updatedAt: meal.updatedAt,
             isSynced: meal.isSynced,
@@ -230,6 +275,7 @@ let NutritionService = class NutritionService {
 exports.NutritionService = NutritionService;
 exports.NutritionService = NutritionService = __decorate([
     (0, common_1.Injectable)(),
-    __metadata("design:paramtypes", [prisma_service_1.PrismaService])
+    __metadata("design:paramtypes", [prisma_service_1.PrismaService,
+        cache_service_1.CacheService])
 ], NutritionService);
 //# sourceMappingURL=nutrition.service.js.map

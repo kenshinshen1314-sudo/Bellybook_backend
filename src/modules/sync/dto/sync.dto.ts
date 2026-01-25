@@ -1,7 +1,11 @@
-import { IsString, IsOptional, IsEnum, IsArray, IsBoolean, IsDate } from 'class-validator';
+import { IsString, IsOptional, IsEnum, IsArray, IsBoolean, IsDate, IsNumber, IsObject } from 'class-validator';
 import { MealResponseDto } from '../../meals/dto/meal-response.dto';
 import { ProfileResponseDto } from '../../users/dto/user-response.dto';
 import { SettingsResponseDto } from '../../users/dto/user-response.dto';
+import { CreateMealDto } from '../../meals/dto/create-meal.dto';
+
+// Re-export DTO types for convenience
+export type { MealResponseDto, ProfileResponseDto, SettingsResponseDto };
 
 export class CuisineUnlockDto {
   cuisineName!: string;
@@ -21,6 +25,14 @@ export class SyncPullResponseDto {
   hasMore!: boolean;
 }
 
+// Payload types for sync operations
+export type SyncPushPayload =
+  | CreateMealDto
+  | { id: string; version: number; imageUrl?: string; thumbnailUrl?: string; analysis?: object; notes?: string }
+  | { id: string }
+  | ProfileResponseDto
+  | SettingsResponseDto;
+
 export class SyncPushItem {
   @IsString()
   id!: string;
@@ -28,7 +40,8 @@ export class SyncPushItem {
   @IsEnum(['CREATE_MEAL', 'UPDATE_MEAL', 'DELETE_MEAL', 'UPDATE_PROFILE', 'UPDATE_SETTINGS'])
   type!: 'CREATE_MEAL' | 'UPDATE_MEAL' | 'DELETE_MEAL' | 'UPDATE_PROFILE' | 'UPDATE_SETTINGS';
 
-  payload!: any;
+  @IsObject()
+  payload!: SyncPushPayload;
 
   @IsString()
   clientId!: string;
@@ -60,9 +73,11 @@ export class SyncPushConflictItem {
   @IsString()
   type!: string;
 
-  serverVersion!: any;
+  @IsNumber()
+  serverVersion!: number;
 
-  clientVersion!: any;
+  @IsNumber()
+  clientVersion!: number;
 }
 
 export class SyncPushResponseDto {
@@ -89,5 +104,7 @@ export class ConflictResolutionDto {
   @IsEnum(['LAST_WRITE_WINS', 'SERVER_WINS', 'CLIENT_WINS', 'MANUAL'])
   resolution!: 'LAST_WRITE_WINS' | 'SERVER_WINS' | 'CLIENT_WINS' | 'MANUAL';
 
-  manualValue?: any;
+  @IsOptional()
+  @IsObject()
+  manualValue?: Record<string, unknown>;
 }

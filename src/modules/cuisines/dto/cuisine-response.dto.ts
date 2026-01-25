@@ -55,3 +55,13 @@ export class CuisineDetailDto {
   lastMealAt?: Date;
   nutritionSummary!: NutritionSummary;
 }
+
+export class CuisineDetailStatsDto {
+  cuisineName!: string;
+  totalMeals!: number;
+  uniqueDishes!: number;
+  totalCalories!: number;
+  averageCalories!: number;
+  firstMealAt!: Date;
+  lastMealAt!: Date;
+}

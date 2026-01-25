@@ -2,6 +2,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { NotFoundException } from '@nestjs/common';
 import { UsersService } from './users.service';
 import { PrismaService } from '../../database/prisma.service';
+import { CacheService } from '../cache/cache.service';
 import { UpdateProfileDto } from './dto/update-profile.dto';
 import { UpdateSettingsDto } from './dto/update-settings.dto';
 
@@ -29,6 +30,13 @@ describe('UsersService', () => {
     user_settings: {
       upsert: jest.fn(),
     },
+    $queryRaw: jest.fn(),
+  };
+
+  const mockCacheService = {
+    get: jest.fn(),
+    set: jest.fn(),
+    del: jest.fn(),
   };
 
   beforeEach(async () => {
@@ -38,6 +46,10 @@ describe('UsersService', () => {
         {
           provide: PrismaService,
           useValue: mockPrismaService,
+        },
+        {
+          provide: CacheService,
+          useValue: mockCacheService,
         },
       ],
     }).compile();
@@ -131,15 +143,21 @@ describe('UsersService', () => {
       const user = { id: userId };
       mockPrismaService.user.findUnique.mockResolvedValue(user);
 
+      // Mock $queryRaw calls - need to mock in order:
+      // 1. First call: periodCounts (week/month meals)
+      // 2. Second call: calculateStreakOptimized
+      // 3. Third call: calculateLongestStreakOptimized
+      mockPrismaService.$queryRaw
+        .mockResolvedValueOnce([{ week_count: 7n, month_count: 20n }])  // periodCounts
+        .mockResolvedValueOnce([{ streak: 0n }])  // calculateStreakOptimized
+        .mockResolvedValueOnce([{ longest_streak: 0n }]);  // calculateLongestStreakOptimized
+
       mockPrismaService.meal.count.mockResolvedValueOnce(10); // totalMeals
       mockPrismaService.cuisine_unlocks.count.mockResolvedValueOnce(5); // totalCuisines
       mockPrismaService.cuisine_unlocks.findMany.mockResolvedValue([
         { cuisineName: 'Chinese', mealCount: 5 },
         { cuisineName: 'Japanese', mealCount: 3 },
       ]);
-      mockPrismaService.meal.findMany.mockResolvedValue([]); // thisWeekMeals for streak
-      mockPrismaService.meal.count.mockResolvedValueOnce(7); // thisWeekMeals count
-      mockPrismaService.meal.count.mockResolvedValueOnce(20); // thisMonthMeals
 
       const result = await service.getStats(userId);
 
@@ -164,24 +182,22 @@ describe('UsersService', () => {
       const user = { id: userId };
       mockPrismaService.user.findUnique.mockResolvedValue(user);
 
-      // Create meals for consecutive days
-      const today = new Date();
-      const meals = Array.from({ length: 5 }, (_, i) => {
-        const date = new Date(today);
-        date.setDate(date.getDate() - i);
-        return { createdAt: date };
-      });
+      // Mock $queryRaw calls in order:
+      // 1. periodCounts (week/month meals)
+      // 2. calculateStreakOptimized - return streak count of 5
+      // 3. calculateLongestStreakOptimized
+      mockPrismaService.$queryRaw
+        .mockResolvedValueOnce([{ week_count: 5n, month_count: 5n }])  // periodCounts
+        .mockResolvedValueOnce([{ streak: 5n }])  // calculateStreakOptimized
+        .mockResolvedValueOnce([{ longest_streak: 5n }]);  // calculateLongestStreakOptimized
 
       mockPrismaService.meal.count.mockResolvedValueOnce(5); // totalMeals
       mockPrismaService.cuisine_unlocks.count.mockResolvedValueOnce(3); // totalCuisines
       mockPrismaService.cuisine_unlocks.findMany.mockResolvedValue([]);
-      mockPrismaService.meal.findMany.mockResolvedValueOnce(meals); // thisWeekMeals for streak
-      mockPrismaService.meal.count.mockResolvedValueOnce(5); // thisWeekMeals count
-      mockPrismaService.meal.count.mockResolvedValueOnce(5); // thisMonthMeals
 
       const result = await service.getStats(userId);
 
-      expect(result.currentStreak).toBeGreaterThan(0);
+      expect(result.currentStreak).toBe(5);
     });
   });
 

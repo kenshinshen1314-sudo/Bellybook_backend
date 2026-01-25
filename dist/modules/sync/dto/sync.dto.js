@@ -46,6 +46,10 @@ __decorate([
     __metadata("design:type", String)
 ], SyncPushItem.prototype, "type", void 0);
 __decorate([
+    (0, class_validator_1.IsObject)(),
+    __metadata("design:type", Object)
+], SyncPushItem.prototype, "payload", void 0);
+__decorate([
     (0, class_validator_1.IsString)(),
     __metadata("design:type", String)
 ], SyncPushItem.prototype, "clientId", void 0);
@@ -94,6 +98,14 @@ __decorate([
     (0, class_validator_1.IsString)(),
     __metadata("design:type", String)
 ], SyncPushConflictItem.prototype, "type", void 0);
+__decorate([
+    (0, class_validator_1.IsNumber)(),
+    __metadata("design:type", Number)
+], SyncPushConflictItem.prototype, "serverVersion", void 0);
+__decorate([
+    (0, class_validator_1.IsNumber)(),
+    __metadata("design:type", Number)
+], SyncPushConflictItem.prototype, "clientVersion", void 0);
 class SyncPushResponseDto {
     success;
     failed;
@@ -127,4 +139,9 @@ __decorate([
     (0, class_validator_1.IsEnum)(['LAST_WRITE_WINS', 'SERVER_WINS', 'CLIENT_WINS', 'MANUAL']),
     __metadata("design:type", String)
 ], ConflictResolutionDto.prototype, "resolution", void 0);
+__decorate([
+    (0, class_validator_1.IsOptional)(),
+    (0, class_validator_1.IsObject)(),
+    __metadata("design:type", Object)
+], ConflictResolutionDto.prototype, "manualValue", void 0);
 //# sourceMappingURL=sync.dto.js.map

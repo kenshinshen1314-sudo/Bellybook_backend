@@ -134,6 +134,9 @@ model Meal {
   @@index([userId])
   @@index([userId, mealType])
   @@index([dishId])
+  @@index([userId, deletedAt, createdAt])  // Optimized for getToday, getByDate queries
+  @@index([userId, cuisine])              // Optimized for getByDishName, ranking queries
+  @@index([userId, cuisine, createdAt])    // Optimized for ranking by period
 }
 
 model ranking_caches {
@@ -162,6 +165,7 @@ model refresh_tokens {
   @@index([expiresAt])
   @@index([token])
   @@index([userId])
+  @@index([userId, revokedAt])  // Optimized for cleanup operations
 }
 
 model sync_logs {
@@ -400,4 +404,38 @@ model dish_unlocks {
   @@index([dishName])
   @@index([userId])
   @@index([userId, mealCount])
+}
+
+// AI 分析任务队列
+model ai_analysis_jobs {
+  id              String        @id @default(cuid())
+  userId          String
+  imageUrl        String
+  thumbnailUrl    String
+  imageBase64     String        @db.Text
+  mealType        MealType      @default(SNACK)
+  status          JobStatus     @default(PENDING)
+  analysisResult  Json?
+  mealId          String?
+  error           String?
+  retryCount      Int           @default(0)
+  startedAt       DateTime?
+  completedAt     DateTime?
+  expiresAt       DateTime?
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @default(now())
+
+  @@index([userId, status])
+  @@index([status])
+  @@index([createdAt])
+  @@index([expiresAt])
+  @@index([status, expiresAt])  // Optimized for job polling
+  @@map("ai_analysis_jobs")
+}
+
+enum JobStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
 }

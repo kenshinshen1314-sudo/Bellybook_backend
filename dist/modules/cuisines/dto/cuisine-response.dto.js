@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.CuisineDetailDto = exports.NutritionSummary = exports.CuisineStatsDto = exports.RecentUnlock = exports.TopCuisine = exports.CuisineUnlockDto = exports.CuisineConfigDto = void 0;
+exports.CuisineDetailStatsDto = exports.CuisineDetailDto = exports.NutritionSummary = exports.CuisineStatsDto = exports.RecentUnlock = exports.TopCuisine = exports.CuisineUnlockDto = exports.CuisineConfigDto = void 0;
 class CuisineConfigDto {
     name;
     nameEn;
@@ -57,4 +57,14 @@ class CuisineDetailDto {
     nutritionSummary;
 }
 exports.CuisineDetailDto = CuisineDetailDto;
+class CuisineDetailStatsDto {
+    cuisineName;
+    totalMeals;
+    uniqueDishes;
+    totalCalories;
+    averageCalories;
+    firstMealAt;
+    lastMealAt;
+}
+exports.CuisineDetailStatsDto = CuisineDetailStatsDto;
 //# sourceMappingURL=cuisine-response.dto.js.map

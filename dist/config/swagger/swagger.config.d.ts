@@ -1,4 +1,5 @@
 import { INestApplication } from '@nestjs/common';
+import type { OpenAPIObject } from '@nestjs/swagger';
 export interface SwaggerConfigOptions {
     enabled?: boolean;
     path?: string;
@@ -21,5 +22,5 @@ export declare const DEFAULT_API_TAGS: {
     name: string;
     description: string;
 }[];
-export declare function createSwaggerConfig(options?: Partial<SwaggerConfigOptions>): Omit<import("@nestjs/swagger").OpenAPIObject, "paths">;
-export declare function setupSwagger(app: INestApplication, document: any): void;
+export declare function createSwaggerConfig(options?: Partial<SwaggerConfigOptions>): Omit<OpenAPIObject, "paths">;
+export declare function setupSwagger(app: INestApplication, document: Omit<OpenAPIObject, 'paths'>): void;

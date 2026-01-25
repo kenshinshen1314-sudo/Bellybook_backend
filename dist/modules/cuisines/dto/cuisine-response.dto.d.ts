@@ -47,3 +47,12 @@ export declare class CuisineDetailDto {
     lastMealAt?: Date;
     nutritionSummary: NutritionSummary;
 }
+export declare class CuisineDetailStatsDto {
+    cuisineName: string;
+    totalMeals: number;
+    uniqueDishes: number;
+    totalCalories: number;
+    averageCalories: number;
+    firstMealAt: Date;
+    lastMealAt: Date;
+}

@@ -1,7 +1,8 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { ThrottlerModule } from '@nestjs/throttler';
-import { APP_GUARD } from '@nestjs/core';
+import { APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
+import { Reflector } from '@nestjs/core';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { DatabaseModule } from './database/database.module';
@@ -14,7 +15,11 @@ import { SyncModule } from './modules/sync/sync.module';
 import { StorageModule } from './modules/storage/storage.module';
 import { RankingModule } from './modules/ranking/ranking.module';
 import { CacheModuleClass } from './modules/cache/cache.module';
+import { BullQueueModule } from './modules/queue/bull-queue.module';
+import { MiddlewareModule } from './common/middleware/middleware.module';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
+import { CacheInterceptor } from './common/interceptors/cache.interceptor';
+// import { UnifiedResponseInterceptor } from './common/interceptors/unified-response.interceptor';
 import { env } from './config/env';
 
 @Module({
@@ -26,7 +31,9 @@ import { env } from './config/env';
       ttl: env.RATE_LIMIT_TTL * 1000,
       limit: env.RATE_LIMIT_MAX,
     }]),
+    MiddlewareModule, // Request logging middleware
     CacheModuleClass, // Global cache module (Redis)
+    BullQueueModule, // Async task queue (Bull + Redis)
     DatabaseModule,
     AuthModule,
     UsersModule,
@@ -44,6 +51,16 @@ import { env } from './config/env';
       provide: APP_GUARD,
       useClass: JwtAuthGuard,
     },
+    {
+      provide: APP_INTERCEPTOR,
+      useClass: CacheInterceptor,
+    },
+    // Temporarily disabled - needs frontend changes to handle unified response format
+    // {
+    //   provide: APP_INTERCEPTOR,
+    //   useClass: UnifiedResponseInterceptor,
+    // },
+    Reflector, // Required for CacheInterceptor and UnifiedResponseInterceptor
   ],
 })
 export class AppModule {}

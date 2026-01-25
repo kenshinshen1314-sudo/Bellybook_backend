@@ -3,6 +3,10 @@
  * [OUTPUT]: 对外提供美食家榜查询逻辑
  * [POS]: ranking 模块的美食家榜查询服务
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ *
+ * [OPTIMIZATION NOTES]
+ * 优化前：$queryRaw + getUserMap() 两次查询
+ * 优化后：单次 SQL 查询完成聚合 + 用户 Join
  */
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../../../database/prisma.service';
@@ -14,82 +18,60 @@ export class GourmetsQuery {
   constructor(private prisma: PrismaService) {}
 
   /**
-   * 获取美食家榜
+   * 获取美食家榜（优化版 - 单次 SQL 查询）
    * 统计每个用户的去重后菜系数量，倒序展示
    */
   async execute(period: RankingPeriod): Promise<GourmetsDto> {
-    const { startDate } = this.getDateRange(period);
+    const { startDate, startDateCondition } = this.getDateRangeSql(period);
 
-    // 使用原始 SQL 获取用户的去重菜系数和餐食数
-    const stats = await this.prisma.$queryRaw<Array<{
+    // 单次 SQL 查询完成所有操作
+    const gourmets = await this.prisma.$queryRaw<Array<{
       userId: string;
+      username: string;
+      avatarUrl: string | null;
       cuisineCount: bigint;
       mealCount: bigint;
     }>>`
       SELECT
-        "userId",
-        COUNT(DISTINCT "cuisine") as "cuisineCount",
-        COUNT(*) as "mealCount"
-      FROM "meals"
-      WHERE "deletedAt" IS NULL
-        ${startDate ? Prisma.sql`AND "createdAt" >= ${startDate}` : Prisma.empty}
-      GROUP BY "userId"
+        u.id as "userId",
+        u.username,
+        u."avatarUrl",
+        COUNT(DISTINCT m.cuisine) as "cuisineCount",
+        COUNT(m.id) as "mealCount"
+      FROM users u
+      INNER JOIN meals m ON m."userId" = u.id
+        AND m."deletedAt" IS NULL
+        ${startDateCondition}
+      LEFT JOIN user_settings us ON us."userId" = u.id
+      WHERE u."deletedAt" IS NULL
+        AND (us.id IS NULL OR us."hideRanking" = false)
+      GROUP BY u.id, u.username, u."avatarUrl"
+      HAVING COUNT(DISTINCT m.cuisine) > 0
+      ORDER BY "cuisineCount" DESC
+      LIMIT 100
     `;
-
-    const userMap = await this.getUserMap();
-
-    const gourmets: GourmetEntry[] = [];
-
-    for (const stat of stats) {
-      const user = userMap.get(stat.userId);
-      if (!user) continue;
-
-      gourmets.push({
-        rank: 0,
-        userId: stat.userId,
-        username: user.username,
-        avatarUrl: user.avatarUrl,
-        cuisineCount: Number(stat.cuisineCount),
-        mealCount: Number(stat.mealCount),
-        cuisines: [], // 可选：查询具体菜系
-      });
-    }
-
-    gourmets.sort((a, b) => b.cuisineCount - a.cuisineCount);
-    gourmets.forEach((g, index) => { g.rank = index + 1; });
 
     return {
       period,
-      gourmets: gourmets.slice(0, 100),
+      gourmets: gourmets.map((r, index) => ({
+        rank: index + 1,
+        userId: r.userId,
+        username: r.username,
+        avatarUrl: r.avatarUrl,
+        cuisineCount: Number(r.cuisineCount),
+        mealCount: Number(r.mealCount),
+        cuisines: [], // 可选：查询具体菜系
+      })),
     };
   }
 
   /**
-   * 获取用户映射（愿意参与排行榜的用户）
+   * 根据时段获取开始日期和 SQL 条件
    */
-  private async getUserMap(): Promise<Map<string, { username: string; avatarUrl: string | null }>> {
-    const users = await this.prisma.user.findMany({
-      where: {
-        deletedAt: null,
-        OR: [
-          { user_settings: { is: null } },
-          { user_settings: { hideRanking: false } },
-        ],
-      },
-      select: {
-        id: true,
-        username: true,
-        avatarUrl: true,
-      },
-    });
-
-    return new Map(users.map(u => [u.id, { username: u.username, avatarUrl: u.avatarUrl }]));
-  }
-
-  /**
-   * 根据时段获取开始日期
-   */
-  private getDateRange(period: RankingPeriod): { startDate?: Date } {
+  private getDateRangeSql(period: RankingPeriod): {
+    startDate?: Date;
+    startDateCondition: Prisma.Sql;
+  } {
     const now = new Date();
     let startDate: Date | undefined;
 
@@ -112,6 +94,10 @@ export class GourmetsQuery {
         break;
     }
 
-    return { startDate };
+    const startDateCondition = startDate
+      ? Prisma.sql`AND m."createdAt" >= ${startDate}`
+      : Prisma.empty;
+
+    return { startDate, startDateCondition };
   }
 }

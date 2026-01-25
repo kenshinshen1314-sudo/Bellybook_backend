@@ -13,13 +13,14 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.RankingCacheService = exports.RankingCacheTTL = void 0;
 const common_1 = require("@nestjs/common");
 const cache_service_1 = require("../../cache/cache.service");
+const cache_constants_1 = require("../../cache/cache.constants");
 exports.RankingCacheTTL = {
-    STATS: cache_service_1.CacheTTL.MEDIUM,
-    LEADERBOARD: cache_service_1.CacheTTL.MEDIUM,
-    CUISINE_MASTERS: cache_service_1.CacheTTL.MEDIUM,
-    GOURMETS: cache_service_1.CacheTTL.MEDIUM,
-    DISH_EXPERTS: cache_service_1.CacheTTL.MEDIUM,
-    USER_DETAILS: cache_service_1.CacheTTL.SHORT,
+    STATS: cache_constants_1.CacheTTL.MEDIUM,
+    LEADERBOARD: cache_constants_1.CacheTTL.MEDIUM,
+    CUISINE_MASTERS: cache_constants_1.CacheTTL.MEDIUM,
+    GOURMETS: cache_constants_1.CacheTTL.MEDIUM,
+    DISH_EXPERTS: cache_constants_1.CacheTTL.MEDIUM,
+    USER_DETAILS: cache_constants_1.CacheTTL.SHORT,
 };
 let RankingCacheService = RankingCacheService_1 = class RankingCacheService {
     cacheService;
@@ -28,14 +29,14 @@ let RankingCacheService = RankingCacheService_1 = class RankingCacheService {
         this.cacheService = cacheService;
     }
     async get(key) {
-        const value = await this.cacheService.getWithPrefix(cache_service_1.CachePrefix.RANKING, key);
+        const value = await this.cacheService.getWithPrefix('RANKING', key);
         return value ?? null;
     }
     async set(key, data, ttl = exports.RankingCacheTTL.LEADERBOARD) {
-        await this.cacheService.setWithPrefix(cache_service_1.CachePrefix.RANKING, key, data, ttl);
+        await this.cacheService.setWithPrefix('RANKING', key, data, ttl);
     }
     async delete(key) {
-        await this.cacheService.delWithPrefix(cache_service_1.CachePrefix.RANKING, key);
+        await this.cacheService.delWithPrefix('RANKING', key);
     }
     async clearExpired() {
         this.logger.debug('Redis automatically handles expired cache cleanup');
@@ -45,12 +46,12 @@ let RankingCacheService = RankingCacheService_1 = class RankingCacheService {
         this.logger.log('Cleared all ranking cache');
     }
     async clearPeriod(period) {
-        await this.cacheService.delPattern(`${cache_service_1.CachePrefix.RANKING}:*:${period}`);
+        await this.cacheService.delPattern(`ranking:*:${period}`);
         this.logger.log(`Cleared ranking cache for period: ${period}`);
     }
     async warmup(keysAndValues) {
         await this.cacheService.setMany(keysAndValues.map(({ key, value, ttl }) => ({
-            key: `${cache_service_1.CachePrefix.RANKING}:${key}`,
+            key: `ranking:${key}`,
             value,
             ttl: ttl ?? exports.RankingCacheTTL.LEADERBOARD,
         })));
@@ -58,7 +59,7 @@ let RankingCacheService = RankingCacheService_1 = class RankingCacheService {
     }
     async getStats() {
         return {
-            prefix: cache_service_1.CachePrefix.RANKING,
+            prefix: 'ranking',
             note: 'Redis cache stats require direct Redis client connection',
         };
     }

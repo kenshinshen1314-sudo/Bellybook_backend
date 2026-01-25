@@ -9,7 +9,7 @@ export declare class RankingController {
     getRankingStats(period?: RankingPeriod): Promise<RankingStatsDto>;
     getGourmets(period?: RankingPeriod): Promise<GourmetsDto>;
     getDishExperts(period?: RankingPeriod): Promise<DishExpertsDto>;
-    getCuisineExpertDetail(userId: string, cuisineName: string, period?: RankingPeriod): Promise<CuisineExpertDetailDto>;
+    getCuisineExpertDetail(userId: string, cuisineName: string, period?: RankingPeriod, limit?: number, offset?: number): Promise<CuisineExpertDetailDto>;
     getAllUsersDishes(period?: RankingPeriod): Promise<AllUsersDishesDto>;
-    getUserUnlockedDishes(userId: string): Promise<UserUnlockedDishesDto>;
+    getUserUnlockedDishes(userId: string, limit?: number, offset?: number): Promise<UserUnlockedDishesDto>;
 }

@@ -5,6 +5,5 @@ export declare class GourmetsQuery {
     private prisma;
     constructor(prisma: PrismaService);
     execute(period: RankingPeriod): Promise<GourmetsDto>;
-    private getUserMap;
-    private getDateRange;
+    private getDateRangeSql;
 }

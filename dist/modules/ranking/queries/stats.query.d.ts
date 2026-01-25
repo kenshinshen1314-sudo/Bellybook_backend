@@ -5,5 +5,5 @@ export declare class StatsQuery {
     private prisma;
     constructor(prisma: PrismaService);
     execute(period: RankingPeriod): Promise<RankingStatsDto>;
-    private getDateRange;
+    private getDateRangeSql;
 }

@@ -13,16 +13,22 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.MealsService = void 0;
 const common_1 = require("@nestjs/common");
 const prisma_service_1 = require("../../database/prisma.service");
+const create_meal_dto_1 = require("./dto/create-meal.dto");
 const pagination_dto_1 = require("../../common/dto/pagination.dto");
 const dishes_service_1 = require("../dishes/dishes.service");
 const date_util_1 = require("../../common/utils/date.util");
+const cache_service_1 = require("../cache/cache.service");
+const cache_decorator_1 = require("../cache/cache.decorator");
+const cache_constants_1 = require("../cache/cache.constants");
 let MealsService = MealsService_1 = class MealsService {
     prisma;
     dishesService;
+    cacheService;
     logger = new common_1.Logger(MealsService_1.name);
-    constructor(prisma, dishesService) {
+    constructor(prisma, dishesService, cacheService) {
         this.prisma = prisma;
         this.dishesService = dishesService;
+        this.cacheService = cacheService;
     }
     async create(userId, dto) {
         const firstDish = this.extractFirstDish(dto.analysis);
@@ -71,7 +77,18 @@ let MealsService = MealsService_1 = class MealsService {
             timeout: 10000,
         });
         this.logger.log(`Meal created: ${result.meal.id} for user: ${userId}`);
+        await this.invalidateRelatedCaches(userId);
         return this.mapToMealResponse(result.meal);
+    }
+    async invalidateRelatedCaches(userId) {
+        await this.cacheService.del(`${cache_constants_1.CachePrefix.CUISINE_UNLOCKS}:cuisine:stats:${userId}`);
+        await this.cacheService.del(`${cache_constants_1.CachePrefix.USER}:${userId}:stats`);
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        const todayStr = today.toISOString().split('T')[0];
+        await this.cacheService.del(`${cache_constants_1.CachePrefix.DAILY_NUTRITION}:${userId}:${todayStr}`);
+        const periods = ['week', 'month', 'year', 'all'];
+        await Promise.all(periods.map(period => this.cacheService.del(`${cache_constants_1.CachePrefix.DAILY_NUTRITION}:summary:${userId}:${period}`)));
     }
     async createPending(userId, dto) {
         const meal = await this.prisma.meal.create({
@@ -348,7 +365,7 @@ let MealsService = MealsService_1 = class MealsService {
     extractFirstDish(analysis) {
         const firstDish = analysis.dishes?.[0];
         if (!firstDish) {
-            throw new Error('Invalid AI response: no dishes found');
+            throw new common_1.BadRequestException('Invalid AI response: no dishes found');
         }
         return firstDish;
     }
@@ -408,9 +425,16 @@ let MealsService = MealsService_1 = class MealsService {
     }
 };
 exports.MealsService = MealsService;
+__decorate([
+    (0, cache_decorator_1.CacheInvalidate)(cache_constants_1.CachePrefix.CUISINE_UNLOCKS, ['userId'], `${cache_constants_1.CachePrefix.CUISINE_UNLOCKS}:${cache_constants_1.CachePrefix.CUISINE_UNLOCKS}:*`),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [String, create_meal_dto_1.CreateMealDto]),
+    __metadata("design:returntype", Promise)
+], MealsService.prototype, "create", null);
 exports.MealsService = MealsService = MealsService_1 = __decorate([
     (0, common_1.Injectable)(),
     __metadata("design:paramtypes", [prisma_service_1.PrismaService,
-        dishes_service_1.DishesService])
+        dishes_service_1.DishesService,
+        cache_service_1.CacheService])
 ], MealsService);
 //# sourceMappingURL=meals.service.js.map

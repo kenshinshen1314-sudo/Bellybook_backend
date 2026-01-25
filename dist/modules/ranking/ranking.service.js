@@ -13,12 +13,20 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.RankingService = void 0;
 const common_1 = require("@nestjs/common");
 const prisma_service_1 = require("../../database/prisma.service");
+const cache_service_1 = require("../cache/cache.service");
+const cache_stats_service_1 = require("../cache/cache-stats.service");
+const cache_decorator_1 = require("../cache/cache.decorator");
+const cache_constants_1 = require("../cache/cache.constants");
 const ranking_query_dto_1 = require("./dto/ranking-query.dto");
 let RankingService = RankingService_1 = class RankingService {
     prisma;
+    cacheService;
+    cacheStatsService;
     logger = new common_1.Logger(RankingService_1.name);
-    constructor(prisma) {
+    constructor(prisma, cacheService, cacheStatsService) {
         this.prisma = prisma;
+        this.cacheService = cacheService;
+        this.cacheStatsService = cacheStatsService;
     }
     async getCuisineMasters(cuisineName, period = ranking_query_dto_1.RankingPeriod.ALL_TIME) {
         const { startDate } = this.getDateRange(period);
@@ -447,27 +455,28 @@ let RankingService = RankingService_1 = class RankingService {
         if (!user) {
             throw new common_1.NotFoundException('User not found');
         }
-        const where = {
-            userId,
-            cuisine: cuisineName,
-            deletedAt: null,
-        };
-        if (startDate) {
-            where.createdAt = { gte: startDate };
-        }
-        const meals = await this.prisma.meal.findMany({
-            where,
-            select: {
-                foodName: true,
-                cuisine: true,
-                createdAt: true,
-                imageUrl: true,
-                calories: true,
-                notes: true,
-            },
-            orderBy: { createdAt: 'desc' },
-        });
-        if (meals.length === 0) {
+        const dateFilter = startDate
+            ? `AND m."createdAt" >= '${startDate.toISOString()}'`
+            : '';
+        const dishes = await this.prisma.$queryRaw `
+      SELECT
+        m."foodName" AS dishname,
+        m.cuisine,
+        COUNT(*) AS mealcount,
+        MIN(m."createdAt") AS firstmealat,
+        MAX(m."createdAt") AS lastmealat,
+        MAX(m."imageUrl") AS imageurl,
+        MAX(m.calories) AS calories,
+        MAX(m.notes) AS notes
+      FROM meals m
+      WHERE m."userId" = ${userId}
+        AND m.cuisine = ${cuisineName}
+        AND m."deletedAt" IS NULL
+        ${dateFilter}
+      GROUP BY m."foodName", m.cuisine
+      ORDER BY mealcount DESC
+    `;
+        if (dishes.length === 0) {
             return {
                 userId: user.id,
                 username: user.username,
@@ -479,38 +488,26 @@ let RankingService = RankingService_1 = class RankingService {
                 dishes: [],
             };
         }
-        const dishStats = new Map();
-        for (const meal of meals) {
-            const existing = dishStats.get(meal.foodName);
-            if (!existing) {
-                dishStats.set(meal.foodName, {
-                    dishName: meal.foodName,
-                    cuisine: meal.cuisine,
-                    mealCount: 1,
-                    firstMealAt: new Date(meal.createdAt).toISOString(),
-                    lastMealAt: new Date(meal.createdAt).toISOString(),
-                    imageUrl: meal.imageUrl,
-                    calories: meal.calories || undefined,
-                    notes: meal.notes || undefined,
-                });
-            }
-            else {
-                existing.mealCount++;
-                existing.lastMealAt = new Date(meal.createdAt).toISOString();
-            }
-        }
-        const dishes = Array.from(dishStats.values()).sort((a, b) => b.mealCount - a.mealCount);
-        const totalMeals = meals.length;
-        const totalDishes = dishes.length;
+        const totalMeals = dishes.reduce((sum, d) => sum + Number(d.mealcount), 0);
+        const dishEntries = dishes.map(d => ({
+            dishName: d.dishname,
+            cuisine: d.cuisine,
+            mealCount: Number(d.mealcount),
+            firstMealAt: new Date(d.firstmealat).toISOString(),
+            lastMealAt: new Date(d.lastmealat).toISOString(),
+            imageUrl: d.imageurl || undefined,
+            calories: d.calories || undefined,
+            notes: d.notes || undefined,
+        }));
         return {
             userId: user.id,
             username: user.username,
             avatarUrl: user.avatarUrl,
             cuisineName,
             period,
-            totalDishes,
+            totalDishes: dishes.length,
             totalMeals,
-            dishes,
+            dishes: dishEntries,
         };
     }
     async getAllUsersDishes(period = ranking_query_dto_1.RankingPeriod.WEEKLY) {
@@ -614,66 +611,86 @@ let RankingService = RankingService_1 = class RankingService {
         if (!user) {
             throw new common_1.NotFoundException('User not found');
         }
-        const unlocks = await this.prisma.dish_unlocks.findMany({
-            where: { userId },
-            select: {
-                dishName: true,
-                mealCount: true,
-                firstMealAt: true,
-                lastMealAt: true,
-            },
-            orderBy: { lastMealAt: 'desc' },
-        });
-        const dishNames = unlocks.map(u => u.dishName);
-        const mealsInfo = await this.prisma.meal.findMany({
-            where: {
-                foodName: { in: dishNames },
-                userId,
-                deletedAt: null,
-            },
-            select: {
-                foodName: true,
-                cuisine: true,
-                imageUrl: true,
-                calories: true,
-            },
-            distinct: ['foodName'],
-        });
-        const dishInfoMap = new Map();
-        for (const meal of mealsInfo) {
-            dishInfoMap.set(meal.foodName, {
-                cuisine: meal.cuisine,
-                imageUrl: meal.imageUrl || undefined,
-                calories: meal.calories || undefined,
-            });
-        }
-        const dishes = unlocks.map(unlock => {
-            const info = dishInfoMap.get(unlock.dishName);
-            return {
-                dishName: unlock.dishName,
-                cuisine: info?.cuisine || '未知',
-                mealCount: unlock.mealCount,
-                firstMealAt: unlock.firstMealAt.toISOString(),
-                lastMealAt: unlock.lastMealAt?.toISOString() || unlock.firstMealAt.toISOString(),
-                imageUrl: info?.imageUrl,
-                calories: info?.calories,
-            };
-        });
-        dishes.sort((a, b) => b.mealCount - a.mealCount);
-        const totalMeals = dishes.reduce((sum, d) => sum + d.mealCount, 0);
+        const dishes = await this.prisma.$queryRaw `
+      SELECT
+        du."dishName" AS dishname,
+        du."mealCount" AS mealcount,
+        du."firstMealAt" AS firstmealat,
+        du."lastMealAt" AS lastmealat,
+        m.cuisine,
+        m."imageUrl" AS imageurl,
+        m.calories
+      FROM dish_unlocks du
+      LEFT JOIN LATERAL (
+        SELECT
+          m2.cuisine,
+          m2."imageUrl",
+          m2.calories
+        FROM meals m2
+        WHERE m2."userId" = du."userId"
+          AND m2."foodName" = du."dishName"
+          AND m2."deletedAt" IS NULL
+        ORDER BY m2."createdAt" DESC
+        LIMIT 1
+      ) m ON true
+      WHERE du."userId" = ${userId}
+      ORDER BY du."mealCount" DESC
+    `;
+        const dishEntries = dishes.map(d => ({
+            dishName: d.dishname,
+            cuisine: d.cuisine || '未知',
+            mealCount: d.mealcount,
+            firstMealAt: new Date(d.firstmealat).toISOString(),
+            lastMealAt: new Date(d.lastmealat).toISOString(),
+            imageUrl: d.imageurl || undefined,
+            calories: d.calories || undefined,
+        }));
+        const totalMeals = dishes.reduce((sum, d) => sum + d.mealcount, 0);
         return {
             userId: user.id,
             username: user.username,
             avatarUrl: user.avatarUrl,
             totalDishes: dishes.length,
             totalMeals,
-            dishes,
+            dishes: dishEntries,
         };
     }
 };
 exports.RankingService = RankingService;
+__decorate([
+    (0, cache_decorator_1.Cacheable)('ranking:cuisine_masters', ['cuisineName', 'period'], cache_constants_1.CacheTTL.MEDIUM),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [String, String]),
+    __metadata("design:returntype", Promise)
+], RankingService.prototype, "getCuisineMasters", null);
+__decorate([
+    (0, cache_decorator_1.Cacheable)('ranking:leaderboard', ['period', 'tier'], cache_constants_1.CacheTTL.MEDIUM),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [String, String]),
+    __metadata("design:returntype", Promise)
+], RankingService.prototype, "getLeaderboard", null);
+__decorate([
+    (0, cache_decorator_1.Cacheable)('ranking:stats', ['period'], cache_constants_1.CacheTTL.MEDIUM),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [String]),
+    __metadata("design:returntype", Promise)
+], RankingService.prototype, "getRankingStats", null);
+__decorate([
+    (0, cache_decorator_1.Cacheable)('ranking:gourmets', ['period'], cache_constants_1.CacheTTL.MEDIUM),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [String]),
+    __metadata("design:returntype", Promise)
+], RankingService.prototype, "getGourmets", null);
+__decorate([
+    (0, cache_decorator_1.Cacheable)('ranking:dish_experts', ['period'], cache_constants_1.CacheTTL.MEDIUM),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [String]),
+    __metadata("design:returntype", Promise)
+], RankingService.prototype, "getDishExperts", null);
 exports.RankingService = RankingService = RankingService_1 = __decorate([
     (0, common_1.Injectable)(),
-    __metadata("design:paramtypes", [prisma_service_1.PrismaService])
+    __metadata("design:paramtypes", [prisma_service_1.PrismaService,
+        cache_service_1.CacheService,
+        cache_stats_service_1.CacheStatsService])
 ], RankingService);
 //# sourceMappingURL=ranking.service.js.map

@@ -12,6 +12,7 @@ const cache_manager_1 = require("@nestjs/cache-manager");
 const config_1 = require("@nestjs/config");
 const cache_manager_redis_store_1 = require("cache-manager-redis-store");
 const cache_service_1 = require("./cache.service");
+const cache_stats_service_1 = require("./cache-stats.service");
 var cache_manager_2 = require("@nestjs/cache-manager");
 Object.defineProperty(exports, "NestJSCacheModule", { enumerable: true, get: function () { return cache_manager_2.CacheModule; } });
 let CacheModuleClass = class CacheModuleClass {
@@ -40,8 +41,8 @@ exports.CacheModuleClass = CacheModuleClass = __decorate([
                 },
             }),
         ],
-        providers: [cache_service_1.CacheService],
-        exports: [cache_service_1.CacheService, cache_manager_1.CacheModule],
+        providers: [cache_service_1.CacheService, cache_stats_service_1.CacheStatsService],
+        exports: [cache_service_1.CacheService, cache_stats_service_1.CacheStatsService, cache_manager_1.CacheModule],
     })
 ], CacheModuleClass);
 //# sourceMappingURL=cache.module.js.map
